@@ -1,4 +1,15 @@
-local stringutils = {}
+-- Library of my custom tweaks
+
+function Trand(tb)
+	math.randomseed( os.time() )
+	return tb[math.random(#tb)]
+end
+
+function Sleep(n)  -- seconds
+  local clock = os.clock
+  local t0 = clock()
+  while clock() - t0 <= n do end
+end
 
 function FileExists(name)
   if type(name)~="string" then return false end
@@ -20,30 +31,11 @@ function IsDir(name)
   return (FileExists(name) and not IsFile(name))
 end
 
-function string.getind(s, ind) return s:sub(ind,ind) end
-
-function string.repind(s, ind, news)
-  local l = s:sub(1, ind-1)
-  local r = s:sub(ind+1, #s)
-  return l..news..r
-end
-
-function string.insert(s, ind, news)
-  local l = s:sub(1, ind)
-  local r = s:sub(ind+1, #s)
-  return l..news..r
-end
-
-function table.has_value (tab, val)
+function table.has_value(tab, val)
   for _, value in ipairs(tab) do if value == val then return true end end
   return false
 end
 
-function Sleep(n)  -- seconds
-  local clock = os.clock
-  local t0 = clock()
-  while clock() - t0 <= n do end
-end
 
 function table.contains(table, element)
   for _, value in pairs(table) do
@@ -54,64 +46,6 @@ function table.contains(table, element)
   return false
 end
 
-
-
-
-local meta = getmetatable("") -- get the string metatable
-
-meta.__add = function(a,b) -- the + operator
-    return a..b
-end
-
-meta.__sub = function(a,b) -- the - operator
-    return a:gsub(b,"")
-end
-
-meta.__mul = function(a,b) -- the * operator
-    return a:rep(b)
-end
-
--- if you have string.explode (check out the String exploding snippet) you can also add this:
-meta.__div = function(a,b) -- the / operator
-    return a:SplitStr(b)
-end
-
-meta.__index = function(a,b) -- if you attempt to do string[id]
-    if type(b) ~= "number" then
-        return string[b]
-    end
-    return a:sub(b,b)
-end
-
-function string.starts_with(str, start)
-   return str:sub(1, #start) == start
-end
-
-function string.ends_with(str, ending)
-   return ending == "" or str:sub(-#ending) == ending
-end
-
-function string.capfirst(inStr)
-    local out = inStr:gsub("^%l",string.upper)
-    return out
-end
-
-function string.split(s, delimiter)
-    local result = {};
-    for match in (s..delimiter):gmatch("(.-)"..delimiter) do
-        table.insert(result, match);
-    end
-    return result;
-end
-
-function Trand(tb)
-	math.randomseed( os.time() )
-	return tb[math.random(#tb)]
-end
-
-function string.hasPrefix(str, start) return stringutils.starts_with(str, start) end
-function string.hasSuffix(str, ends) return stringutils.ends_with(str, ends) end
-function string.SplitStr(s, delim) return stringutils.split(s, delim) end
 
 function table.val_to_str ( v )
   if "string" == type( v ) then
@@ -147,6 +81,82 @@ function table.toStr( tbl )
     end
   end
   return "{" .. table.concat( result, "," ) .. "}"
+end
+
+
+function table.slice(tbl, first, last, step)
+	local sliced = {}
+
+	for i = first or 1, last or #tbl, step or 1 do
+	  sliced[#sliced+1] = tbl[i]
+	end
+ 
+	return sliced
+end
+
+local meta = getmetatable("") -- get the string metatable
+
+meta.__add = function(a,b) -- the + operator
+    return a..b
+end
+
+meta.__sub = function(a,b) -- the - operator
+    return a:gsub(b,"")
+end
+
+meta.__mul = function(a,b) -- the * operator
+    return a:rep(b)
+end
+
+-- if you have string.explode (check out the String exploding snippet) you can also add this:
+meta.__div = function(a,b) -- the / operator
+    return a:SplitStr(b)
+end
+
+meta.__index = function(a,b) -- if you attempt to do string[id]
+    if type(b) ~= "number" then
+        return string[b]
+    end
+    return a:sub(b,b)
+end
+
+function string.contains(s, v)
+	if s:find(v, 1, true) then return true else return false end
+end
+
+function string.starts_with(str, start)
+   return str:sub(1, #start) == start
+end
+
+function string.ends_with(str, ending)
+   return ending == "" or str:sub(-#ending) == ending
+end
+
+function string.capfirst(inStr)
+    local out = inStr:gsub("^%l",string.upper)
+    return out
+end
+
+function string.split(s, delimiter)
+    local result = {};
+    for match in (s..delimiter):gmatch("(.-)"..delimiter) do
+        table.insert(result, match);
+    end
+    return result;
+end
+
+function string.getind(s, ind) return s:sub(ind,ind) end
+
+function string.repind(s, ind, news)
+  local l = s:sub(1, ind-1)
+  local r = s:sub(ind+1, #s)
+  return l..news..r
+end
+
+function string.insert(s, ind, news)
+  local l = s:sub(1, ind)
+  local r = s:sub(ind+1, #s)
+  return l..news..r
 end
 
 function string.getFileExt( path )
@@ -204,16 +214,6 @@ function math.Rand( low, high )
 	return low + ( high - low ) * math.random()
 end
 
-function table.slice(tbl, first, last, step)
-	local sliced = {}
-
-	for i = first or 1, last or #tbl, step or 1 do
-	  sliced[#sliced+1] = tbl[i]
-	end
- 
-	return sliced
-end
-
 function ShallowCopy(orig)
     local orig_type = type(orig)
     local copy
@@ -246,11 +246,3 @@ end
 function Implement(orig)
     return DeepCopy(orig)
 end
-
-function string.contains(s, v)
-	if s:find(v, 1, true) then return true else return false end
-end
-
-return {
-	stringutils = stringutils;
-}

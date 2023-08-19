@@ -4,7 +4,7 @@
 ---@diagnostic disable: trailing-space
 
 local class = require 'middleclass'
-local lib = require 'lib'
+local techno = require 'techno'
 JSON = require "json"
 
 -- Constants
