@@ -57,11 +57,22 @@ GlobalSave = {
         music = true
     },
     keys = {
-        move_up = { "w", "up" },
-        move_down = { "s", "down" },
-        move_right = { "d", "right" },
-        move_left = { "a", "left" },
-        fire = { "l", "return", "x", "space" },
+        move_up = { "w" },
+        move_down = { "s"},
+        move_right = { "d" },
+        move_left = { "a"},
+        confirm = { "return", "space" },
+        fire_up = { "up" },
+        fire_down = { "down" },
+        fire_right = { "right" },
+        fire_left = { "left" },
+        special1 = { "z", "1" },
+        special2 = { "x", "2" },
+        special3 = { "c", "3" },
+        special4 = { "v", "4" },
+        special5 = { "b", "5" },
+        special6 = { "n", "6" },
+        special7 = { "m", "7" },
     }
 }
 
@@ -69,7 +80,6 @@ Spawner = {
     player = function(x, y)
         Player = Entity:new(x, y)
         Player.id = "player"
-        Player.class_type = "player"
         Player.sprite = Sprites.player
         Player.health = CurrentSave.player.health
         Player.sounds["hit"] = A.newSource("sounds/hit.mp3", "static")
@@ -80,6 +90,7 @@ Spawner = {
         local spawned = Entity:new(x, y)
         spawned.sprite = Sprites.enemy1
         spawned.alliance = 1
+        spawned.direction = "down"
         spawned:attach("stationary_enemy")
         spawned.attack_delay = 90
         spawned.sounds["hit"] = A.newSource("sounds/hit.mp3", "static")
@@ -93,9 +104,9 @@ Spawner = {
                     local nex = math.random(-50, 50)
                     local ney = math.random(-50, 50)
                     local exp = Entity:new(me.x + nex, me.y + ney)
+                    exp.pickup = true
                     exp.sprite = Sprites.pow
                     exp:attach("orb")
-                    exp.class_type = "exp"
                     exp:add_to_world()
                 end
 
@@ -130,7 +141,7 @@ Scenes = {
             Slots = {}
         },
         keypress = function( key, scancode, isrepeat ) 
-            if table.has_value(GlobalSave.keys.fire, key) then
+            if table.has_value(GlobalSave.keys.confirm, key) then
                     GlobalSave.system.savefile = SV().SelectedSlot
                     if LoadSave() then
                         print("File exists")
@@ -191,7 +202,7 @@ Scenes = {
             -- fire key; saves selectedslot to globalsave system then call LoadSave
         end,
         draw = function()
-            G.print(GetKey("fire").." to select save file", 0, 0)
+            G.print(GetKey("confirm").." to select save file", 0, 0)
             G.print("Music: "..tostring(GlobalSave.system.music), 400, 0)
             local x_off = 100
             local y_off = 100
@@ -244,7 +255,7 @@ Scenes = {
             --SetBG()
         end,
         update = function(dt)
-            for _, key in ipairs(GlobalSave.keys.fire) do
+            for _, key in ipairs(GlobalSave.keys.confirm) do
                 if KB.isDown(key) and SV().cooldown == 0 then
                     Scene.set("combat")
                     Sfx("start")
@@ -261,147 +272,23 @@ Scenes = {
             DrawHUD()
             
             if Scenes.ship_main.vars.cooldown == 0 then
-                G.print(" | Press "..GetKey("fire").." to start.", 400, 0)
+                G.print(" | Press "..GetKey("confirm").." to start.", 400, 0)
             else
                 G.print(" | "..tostring(Scenes.ship_main.vars.cooldown), 400, 0)
             end
         end,
         closing = function() end
-    },
-    combat = {
-        vars = {
-            ReverseBG = false,
-            Cooldown = 100,
-            PlayedVictory = false
-        },
-        keypress = function( key, scancode, isrepeat ) end,
-        opening = function()
-            PlayMusic("space")
-            Scenes.combat.vars.Cooldown = 100
-            Scenes.combat.vars.PlayedVictory = false
-            LastID = 0
-            -- Create the player
-            Spawner.player(500, 200)
-
-            -- Testing TODO remove later
-            local testEnemy = Spawner.basic_enemy(100, 100)
-            testEnemy.attack_delay = 90
-
-
-            local testEnemy2 = Spawner.basic_enemy(200, 200)
-            testEnemy2.attack_delay = 50
-
-            local testEnemy3 = Spawner.basic_enemy(300, 300)
-            testEnemy3.attack_delay = 30
-        
-        end,
-        update = function(dt)
-            if #EntityList == 0 and Scenes.combat.vars.Cooldown >= 0 then
-                if SV().PlayedVictory == false then
-                    Sfx("yay")
-                    SV().PlayedVictory = true
-                end
-                Scenes.combat.vars.Cooldown = Scenes.combat.vars.Cooldown - 1
-                if Scenes.combat.vars.Cooldown == 0 then
-                    Scene.set("ship_main")
-                    return
-                end
-            end
-            
-            
-            if Scenes.combat.vars.ReverseBG then
-                BackgroundRGBA.R = BackgroundRGBA.R - 1
-                if BackgroundRGBA.R < 50 then Scenes.combat.vars.ReverseBG = false end
-                SetBG()
-            else
-                BackgroundRGBA.R = BackgroundRGBA.R + 1
-                if BackgroundRGBA.R > 150 then Scenes.combat.vars.ReverseBG = true end
-                SetBG()
-            end
-
-            Player:tick()
-            
-            if KB.isDown("f1") then 
-                Scene.set("ship_main") 
-                return
-            end 
-            
-            for _, key in ipairs(GlobalSave.keys.fire) do
-                if KB.isDown(key) then
-                    Player:fire()
-                end
-            end
-
-            for _, key in ipairs(GlobalSave.keys.move_right) do
-                if KB.isDown(key) then
-                    Player:start_move("x", Player.move_speed)
-                end
-            end
-
-            for _, key in ipairs(GlobalSave.keys.move_left) do
-                if KB.isDown(key) then
-                    Player:start_move("x", -Player.move_speed)
-                end
-            end
-
-            for _, key in ipairs(GlobalSave.keys.move_down) do
-                if KB.isDown(key) then
-                    Player:start_move("y", Player.move_speed)
-                end
-            end
-
-            for _, key in ipairs(GlobalSave.keys.move_up) do
-                if KB.isDown(key) then
-                    Player:start_move("y", -Player.move_speed)
-                end
-            end
-
-            Player:process_movement()
-
-            for _, ent in ipairs(EntityList) do
-                if ent.ai ~= nil then ent:ai() end
-                ent:process_movement()
-                ent:tick()
-            end
-        end,
-        draw = function()
-            DrawHUD()
-            DoFloatingText()
-
-            Player:draw()
-
-            for _, ent in ipairs(EntityList) do
-                ent:draw()
-
-            end
-            
-            if #EntityList == 0 then
-                G.print("Encounter complete!", 300, 300)
-            end
-        end,
-        closing = function()
-            print("Cleaning up "..tostring(#EntityList).." entities.")
-            while #EntityList > 0 do
-                for _, ent in ipairs(EntityList) do
-                    ent:remove_from_world()
-                end
-
-            end
-            
-            print("Entity cleanup complete. "..tostring(#EntityList))
-            Player = nil
-        end
-    },
+    }
 }
 
 AIScripts = {
-    projectile_player = function(me)
-        me:move_up(10)
-        me:execute(20)
-    end,
+    --projectile_player = function(me)
+        --me:move_up(me.move_speed)
+        --me:execute(20)
+    --end,
     projectile = function(me)
-        me:move_down(2)
-        me:execute(20)
+        me:move_forward(me.move_speed)
+        me:execute(me.hit_damage)
     end, 
     stationary_enemy = function(me)
         me:fire()
@@ -428,6 +315,9 @@ Entity = class('Entity')
 LastID = 0
 
 function Entity:initialize(x, y)
+    -- Generic variables container, useful to not clutter up the main namespace
+    self.v = {}
+    
     -- Defining location on the screen
     self.x = x or 0
     self.y = y or 0
@@ -435,6 +325,9 @@ function Entity:initialize(x, y)
     -- How fast the sprite moves
     self.move_speed = 5
 
+    -- Direction this entity is facing, usually used for "move forward" calls
+    self.direction = "up"
+    
     -- How rapidly the velocity decays after initial movement
     self.velocity_decay = 1
 
@@ -450,12 +343,12 @@ function Entity:initialize(x, y)
     
     -- Either index of entity, or special value, such as "player"
     self.id = nil
-
-    -- Misc identifier for arbitrary checks
-    self.class_type = nil
     
     -- Generic switch for wether this is a projectile, for quick excemptions from routines that should only effect living entities
     self.projectile = false
+    
+    -- Generic switch for wether this is a pickup, some item on the field
+    self.pickup = false
     
     -- Check for if attacks should land/aggro with eachother
     self.alliance = 0
@@ -472,6 +365,9 @@ function Entity:initialize(x, y)
     -- Can only fire when this value is 0, decays by 1 each tick
     self.attack_cooldown = 0
 
+    -- How much damage does this entity do when it hits another
+    self.hit_damage = 20
+    
     -- The value the cooldown is set to after each attack
     self.attack_delay = 10
     
@@ -507,9 +403,9 @@ end
 -------------------------------------
 function Entity:cleanup_out_of_bounds()
     if self.y < 0 then self:remove_from_world() end
-    if self.y > (G.getHeight() - self.sprite:getHeight()) then self:remove_from_world() end
+    if self.y > (G.getHeight()) then self:remove_from_world() end -- - self.sprite:getHeight()
     if self.x < 0 then self:remove_from_world() end
-    if self.x > (G.getWidth() - self.sprite:getWidth()) then self:remove_from_world() end
+    if self.x > (G.getWidth()) then self:remove_from_world() end --  - self.sprite:getWidth()
 end
 
 -------------------------------------
@@ -524,6 +420,14 @@ end
 -- Move the entity in the specified direction.
 -- @param s Distance to move.
 -------------------------------------
+function Entity:move_forward(s)
+    self["move_"..self.direction](self, s)
+    if self.direction == "right" then self.rotation = 1.6 end
+    if self.direction == "down" then self.rotation = 3.15 end
+    if self.direction == "left" then self.rotation = 4.7 end
+    if self.direction == "up" then self.rotation = 0 end
+end
+
 function Entity:move_up(s)
     self.y = self.y - s
 end
@@ -548,7 +452,7 @@ function Entity:execute(power, single_use)
     if power == nil then power = 10 end
     if single_use == nil then single_use = true end
     
-    if self.class_type == "enemy_projectile" then
+    if self.projectile and self.alliance == 1 then
         local ox = Player.sprite:getWidth()/2 
         local oy = Player.sprite:getHeight()/2 
         if self.x < Player.x + ox and self.x > Player.x - ox and self.y < Player.y + oy and self.y > Player.y - oy then
@@ -556,10 +460,10 @@ function Entity:execute(power, single_use)
             Player:take_damage(power)
             if single_use == true then self:remove_from_world() end
         end
-    elseif self.class_type == "projectile" then
+    elseif self.projectile and self.alliance == 0 then
         for _, ent in ipairs(EntityList) do
             if self.owner == ent.tag then return end
-            if self.class_type == ent.class_type then return end
+            if ent.projectile then return end
             if self.alliance == ent.alliance then return end 
             if ent.projectile then return end
             local ox = ent.sprite:getWidth()/2 
@@ -570,7 +474,7 @@ function Entity:execute(power, single_use)
                 if single_use == true then self:remove_from_world() end
             end
         end
-    elseif self.class_type == "exp" then
+    elseif self.pickup then
         if self:get_distance_entity("player") <= 5 then
             CurrentSave.player.exp = CurrentSave.player.exp + power
             if single_use == true then self:remove_from_world() end
@@ -645,60 +549,40 @@ function Entity:attach(ai)
     self.ai = AIScripts[ai]
 end
 
-function Entity:fire()
+function Entity:fire(dir)
+    if dir == nil then dir = self.direction end
+    
     if self.attack_cooldown > 0 then
         return
     end
+
+    local proj = Entity:new()
     
-    if self.class_type == "player" then
-        local proj = Entity:new()
+    proj.owner = self.id
+    proj.direction = dir
 
-        -- Defined as a projectile, owned by the player
-        proj.owner = "player"
-        proj.class_type = "projectile"
+    if self.id == "player" then
         proj.projectile = true
-
         proj.sprite = Sprites.projectile1
         proj:move_to_entity("player")
-
-        -- Handle sprite offset
-        --proj.x = proj.x + 16
-        --proj.y = proj.y + 10
-
-        -- Attach AI script
-        proj:attach("projectile_player")
-
-        proj:add_to_world()
-
-        -- Delay the players next shot
-        self.attack_cooldown = self.attack_delay
+        proj:attach("projectile")
+        proj.move_speed = 10
         
-        -- Play sound effect
+        -- Play sound effect only for player shots
         self:sfx("shoot")
     else
-        local proj = Entity:new()
-
-        -- Defined as a projectile, owned by the enemy
-        proj.owner = self.id
-        proj.class_type = "enemy_projectile"
-        proj.alliance = 1
         proj.projectile = true
-        
+        proj.alliance = 1
         proj.sprite = Sprites.projectile2
         proj:move_to_entity(self.id)
-
-        -- Handle sprite offset
-        --proj.x = proj.x + 16
-        --proj.y = proj.y + 10
-
-        -- Attach AI script
         proj:attach("projectile")
-
-        proj:add_to_world()
-
-        -- Delay the entities next shot
-        self.attack_cooldown = self.attack_delay
+        proj.move_speed = 2
     end
+
+    proj:add_to_world()
+
+    -- Delay the players next shot
+    self.attack_cooldown = self.attack_delay
 end
 
 function Entity:get_distance_entity(id)
@@ -764,6 +648,8 @@ end
 
 function Entity:process_movement()
     if self.velocity_x > 0 then
+        self.direction = "right"
+        self.rotation = 1.6
         self.velocity_x = self.velocity_x - self.velocity_decay
         if self.x < (G.getWidth() - (self.sprite:getWidth() / 2)) then
             self.x = self.x + self.velocity_x
@@ -771,6 +657,8 @@ function Entity:process_movement()
     end
 
     if self.velocity_y > 0 then
+        self.direction = "down"
+        self.rotation = 3.15
         self.velocity_y = self.velocity_y - self.velocity_decay
         if self.y <  (G.getHeight() - (self.sprite:getHeight() / 2)) then
             self.y = self.y + self.velocity_y
@@ -778,6 +666,8 @@ function Entity:process_movement()
     end
 
     if self.velocity_x < 0 then
+        self.direction = "left"
+        self.rotation = 4.7
         self.velocity_x = self.velocity_x + self.velocity_decay
         if self.x > (self.sprite:getWidth() / 2) then
             self.x = self.x - -self.velocity_x
@@ -785,6 +675,8 @@ function Entity:process_movement()
     end
 
     if self.velocity_y < 0 then
+        self.direction = "up"
+        self.rotation = 0
         self.velocity_y = self.velocity_y + self.velocity_decay
         if self.y > (self.sprite:getHeight() / 2) then
             self.y = self.y - -self.velocity_y
@@ -959,7 +851,6 @@ end
 
 function love.load()
     -- Defining state
-    --UpdateBG(100, 0, 0, 0)
     SaveDir = FS.getSaveDirectory()
 
     -- Loading assets
@@ -1002,6 +893,53 @@ function love.load()
         GlobalSave = LoadFile(GlobalFileName)
     end
 
+    -- Loading extra scripts
+    local connect_extension = function(f)
+        f.gloals = _G
+        if f.on_connect ~= nil then f.on_connect() end
+        
+        if f.scenes ~= nil then
+            for k, v in pairs(f.scenes) do
+                print("Linked scene "..k)
+                Scenes[k] = v
+            end
+        end
+        if f.ai_scripts ~= nil then
+            for k, v in pairs(f.ai_scripts) do
+                print("Linked AI script "..k)
+                AIScripts[k] = v
+            end
+        end
+        if f.spawners ~= nil then
+            for k, v in pairs(f.spawners) do
+                print("Linked Spawner "..k)
+                Spawner[k] = v
+            end
+        end
+    end
+    local sc = love.filesystem.getDirectoryItems( "scripts" )
+    for _, item in ipairs(sc) do
+        if string.ends_with(item, ".lua") then 
+            print("Loading", love.filesystem.getSource().."scripts/"..item)
+            connect_extension(dofile(love.filesystem.getSource().."scripts/"..item))
+            
+        end
+    end
+    
+    -- Loading mods
+    if FS.getInfo("mods") == nil then
+        love.filesystem.createDirectory( "mods" )
+    end
+    
+    local mods = love.filesystem.getDirectoryItems( "mods" )
+    
+    for _, item in ipairs(mods) do
+        if string.ends_with(item, ".lua") then 
+            print("Loading", SaveDir.."/mods/"..item)
+            connect_extension(dofile(SaveDir.."/mods/"..item))
+        end
+    end
+    
     Scene.set("menu_main")
 end
 
@@ -1137,6 +1075,7 @@ function love.textinput(t)
     end
 end
 ConsoleLogStart = 1
+
 function love.draw()
     ---print(G.getColor())
     --love.graphics.clear()
