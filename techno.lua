@@ -37,6 +37,11 @@ function table.has_value(tab, val)
 end
 
 
+function table.has_key(tab, val)
+  for key, _ in pairs(tab) do if key == val then return true end end
+  return false
+end
+
 function table.contains(table, element)
   for _, value in pairs(table) do
     if value == element then
@@ -212,6 +217,10 @@ end
 
 function math.Rand( low, high )
 	return low + ( high - low ) * math.random()
+end
+
+function math.round(float)
+    return float % 1 >= 0.5 and math.ceil(float) or math.floor(float)
 end
 
 function ShallowCopy(orig)

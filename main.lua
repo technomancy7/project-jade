@@ -21,11 +21,11 @@ A = love.audio
 
 -- Variables
 SaveDir = nil
-Player = nil
 CurrentMusic = nil
 StoredMusic = nil
 Paused = false
 ConsoleOpen = false
+DebugMode = false
 
 -- Containers
 Music = {}
@@ -76,15 +76,22 @@ GlobalSave = {
     }
 }
 
+function Player()
+    for _, ent in ipairs(EntityList) do
+        if ent.player then return ent end
+    end
+end
+
 Spawner = {
     player = function(x, y)
-        Player = Entity:new(x, y)
-        Player.id = "player"
-        Player.sprite = Sprites.player
-        Player.health = CurrentSave.player.health
-        Player.sounds["hit"] = A.newSource("sounds/hit.mp3", "static")
-        Player.sounds["shoot"] = A.newSource("sounds/shoot.mp3", "static")
-        return Player
+        local p = Entity:new(x, y)
+        p.sprite = Sprites.player
+        p.health = CurrentSave.player.health
+        p.sounds["hit"] = A.newSource("sounds/hit.mp3", "static")
+        p.sounds["shoot"] = A.newSource("sounds/shoot.mp3", "static")
+        p:add_to_world()
+        p.player = true
+        return p
     end,
     basic_enemy = function(x, y) 
         local spawned = Entity:new(x, y)
@@ -115,9 +122,73 @@ Spawner = {
         
         spawned:add_to_world()
         return spawned
-    end
+    end,
+    meteor1 = function(x, y) 
+        local spawned = Entity:new(x, y)
+        spawned.alliance = -1
+        spawned.health = 10
+        spawned.decoration = true
+        
+        -- TODO ai for meteors, set a low velocity
+        
+        spawned.velocity_x = math.random(-1, 1)
+        spawned.velocity_y = math.random(-1, 1)
+        spawned.velocity_decay = 0
+        spawned:attach("meteor")
+        
+        
+        spawned.sprite = Sprites["meteor"..tostring(math.random(1, 5))]
 
+        -- Add to the entity list
+        spawned:add_to_world()
+        
+        return spawned
+    end,
+    projectile1 = function(x, y, owner, direction) 
+        local spawned = Entity:new(x, y)
+        
+        -- Setting the projectile owner, to attribute damage done to the target to the entity who fired it
+        spawned.owner = owner.id
+        
+        -- Setting direction, if none defined in parameters, then inherit the owner's'
+        spawned.direction = direction or owner.direction
+        
+        -- Flag to say this is a projectile
+        spawned.projectile = true
+        
+        -- Attaching the AI script to make this behave like a projectile
+        spawned:attach("projectile")
+        
+        -- Setting the sprite
+        spawned.sprite = Sprites.projectile1
+        
+        -- How fast this moves
+        spawned.move_speed = 10
+        
+        -- Play sound effect only for player shots
+        owner:sfx("shoot")
+        
+        -- Add to the entity list
+        spawned:add_to_world()
+        
+        return spawned
+    end,
+    projectile1_enemy = function(x, y, owner, direction) 
+        local spawned = Entity:new(x, y)
+        spawned.owner = owner.id
+        spawned.direction = direction or owner.direction
+        spawned.projectile = true
+        spawned:attach("projectile")
+        spawned.alliance = 1
+        spawned.sprite = Sprites.projectile2
+        spawned.move_speed = 2
+
+        spawned:add_to_world()
+        return spawned
+    end
 }
+
+Events = {}
 
 Scene = {
     name = "menu_main",
@@ -127,12 +198,21 @@ Scene = {
         return Scenes[name]
     end,
     
-    set = function(name)
+    set = function(name, skip_opening_event)
         if Scenes[Scene.name] ~= nil then Scenes[Scene.name].closing() end
         Scene.name = name
-        if Scenes[name] ~= nil then Scenes[name].opening() end
+        if Scenes[name] ~= nil and skip_opening_event ~= true then Scenes[name].opening() end
     end,
 }
+
+function ActivateEvent(evt_id)
+    if table.has_key(Events, evt_id) then
+        Scene.set("event_container", true)
+        SV().EvtId = evt_id
+        SV().EvtData = Events[evt_id]
+        Scenes["event_container"].opening()
+    end
+end
 
 Scenes = {
     menu_main = {
@@ -144,17 +224,14 @@ Scenes = {
             if table.has_value(GlobalSave.keys.confirm, key) then
                     GlobalSave.system.savefile = SV().SelectedSlot
                     if LoadSave() then
-                        print("File exists")
                         Scene.set("ship_main")
                         Sfx("confirm")
                         return
                     else
-                        print("File doesn't exist")
                         SaveFile(GetSaveFile(), DefaultSave)
                         SV().Slots[tostring(SV().SelectedSlot)] = DefaultSave
                         Sfx("confirm")
                         LoadSave()
-                        --CurrentSave = DefaultSave.copy
                         return
                     end
                     return
@@ -202,42 +279,54 @@ Scenes = {
             -- fire key; saves selectedslot to globalsave system then call LoadSave
         end,
         draw = function()
+            if BackgroundRGBA.R > 0 then BackgroundRGBA.R = BackgroundRGBA.R - 1 end
+            if BackgroundRGBA.G > 0 then BackgroundRGBA.G = BackgroundRGBA.G - 1 end
+            if BackgroundRGBA.B > 0 then BackgroundRGBA.B = BackgroundRGBA.B - 1 end
+            SetBG()
+            
             G.print(GetKey("confirm").." to select save file", 0, 0)
             G.print("Music: "..tostring(GlobalSave.system.music), 400, 0)
-            local x_off = 100
-            local y_off = 100
+            local x_off = 0
+            local y_off = 40
+            
             if SV().SelectedSlot == 0 then
-                --love.graphics.setColor({0,0,0})
+                local s = SV().Slots["0"]
                 G.rectangle("fill", 140,30, 260,260)
-                if SV().Slots["0"] == nil then G.print({Red, "No data"}, 140 + x_off,30 + y_off) else G.print({Green, SV().Slots["0"].player.name}, 140 + x_off,30 + y_off) end
+                if s == nil then G.print({Red, "No data"}, 140 + x_off,30 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 140 + x_off,30 + y_off) end
             else
+            local s = SV().Slots["0"]
                 G.rectangle("line", 140,30, 260,260)
-                if SV().Slots["0"] == nil then G.print({Red, "No data"}, 140 + x_off,30 + y_off) else G.print({Green, SV().Slots["0"].player.name}, 140 + x_off,30 + y_off) end
+                if SV().Slots["0"] == nil then G.print({Red, "No data"}, 140 + x_off,30 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 140 + x_off,30 + y_off) end
             end
             
             if SV().SelectedSlot == 1 then
+                local s = SV().Slots["1"]
                 G.rectangle("fill", 420,30, 260,260)
-                if SV().Slots["1"] == nil then G.print({Red, "No data"}, 420 + x_off,30 + y_off) else G.print({Green, SV().Slots["1"].player.name}, 420 + x_off,30 + y_off) end
+                if s == nil then G.print({Red, "No data"}, 420 + x_off,30 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 420 + x_off,30 + y_off) end
             else
                 G.rectangle("line", 420,30, 260,260)
-                if SV().Slots["1"] == nil then G.print({Red, "No data"}, 420 + x_off,30 + y_off) else G.print({Green, SV().Slots["1"].player.name}, 420 + x_off,30 + y_off) end
+                local s = SV().Slots["1"]
+                if s == nil then G.print({Red, "No data"}, 420 + x_off,30 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 420 + x_off,30 + y_off) end
             end
             
             if SV().SelectedSlot == 2 then
+                local s = SV().Slots["2"]
                 G.rectangle("fill", 140,310, 260,260)
-                if SV().Slots["2"] == nil then G.print({Red, "No data"}, 140 + x_off,310 + y_off) else G.print({Green, SV().Slots["2"].player.name}, 140 + x_off,310 + y_off) end
+                if SV().Slots["2"] == nil then G.print({Red, "No data"}, 140 + x_off,310 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 140 + x_off,310 + y_off) end
             else
+                local s = SV().Slots["2"]
                 G.rectangle("line", 140,310, 260,260)
-                if SV().Slots["2"] == nil then G.print({Red, "No data"}, 140 + x_off,310 + y_off) else G.print({Green, SV().Slots["2"].player.name}, 140 + x_off,310 + y_off) end
+                if s == nil then G.print({Red, "No data"}, 140 + x_off,310 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 140 + x_off,310 + y_off) end
             end
             
             if SV().SelectedSlot == 3 then
+                local s = SV().Slots["3"]
                 G.rectangle("fill", 420,310, 260,260)
-                if SV().Slots["3"] == nil then G.print({Red, "No data"}, 420 + x_off,310 + y_off) else G.print({Green, SV().Slots["3"].player.name}, 420 + x_off,310 + y_off) end
+                if s == nil then G.print({Red, "No data"}, 420 + x_off,310 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 420 + x_off,310 + y_off) end
             else
-        
+                local s = SV().Slots["3"]
                 G.rectangle("line", 420,310, 260,260)
-                if SV().Slots["3"] == nil then G.print({Red, "No data"}, 420 + x_off,310 + y_off) else G.print({Green, SV().Slots["3"].player.name}, 420 + x_off,310 + y_off) end
+                if s == nil then G.print({Red, "No data"}, 420 + x_off,310 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 420 + x_off,310 + y_off) end
             end
         end,
         closing = function() end
@@ -250,14 +339,12 @@ Scenes = {
         keypress = function( key, scancode, isrepeat ) end,
         opening = function() 
             PlayMusic("code")
-            SV().cooldown = 50
-            UpdateBG(0, 0, 0, 0)
-            --SetBG()
+            SV().cooldown = 30
         end,
         update = function(dt)
             for _, key in ipairs(GlobalSave.keys.confirm) do
                 if KB.isDown(key) and SV().cooldown == 0 then
-                    Scene.set("combat")
+                    DispatchEvent()
                     Sfx("start")
                     return
                 end
@@ -269,6 +356,10 @@ Scenes = {
             if SV().cooldown > 0 then SV().cooldown = SV().cooldown - 1 end
         end,
         draw = function() 
+            if BackgroundRGBA.R > 0 then BackgroundRGBA.R = BackgroundRGBA.R - 1 end
+            if BackgroundRGBA.G > 0 then BackgroundRGBA.G = BackgroundRGBA.G - 1 end
+            if BackgroundRGBA.B > 0 then BackgroundRGBA.B = BackgroundRGBA.B - 1 end
+            SetBG()
             DrawHUD()
             
             if Scenes.ship_main.vars.cooldown == 0 then
@@ -278,14 +369,135 @@ Scenes = {
             end
         end,
         closing = function() end
+    },
+    event_container = {
+        vars = {
+            SelectionID = 1
+        },
+        keypress = function( key, scancode, isrepeat ) 
+            if table.has_value(GlobalSave.keys.move_up, key) or table.has_value(GlobalSave.keys.fire_up, key) then
+                if SV().SelectionID > 1 then
+                    SV().SelectionID = SV().SelectionID - 1
+                    Sfx("button")
+                end
+            end
+            
+            if table.has_value(GlobalSave.keys.move_down, key) or table.has_value(GlobalSave.keys.fire_down, key) then
+                if SV().SelectionID < #SV().EvtData.choices then
+                    SV().SelectionID = SV().SelectionID + 1
+                    Sfx("button")
+                end
+            end
+            
+            if table.has_value(GlobalSave.keys.confirm, key) then
+                print(SV().EvtData.choices[SV().SelectionID][1], SV().EvtData.choices[SV().SelectionID][2])
+                ExecCommand(SV().EvtData.choices[SV().SelectionID][2])
+                Sfx("confirm")
+            end
+            
+            local number = tonumber(key)
+            if number and number >= 1 and number <= #SV().EvtData.choices then
+                print(SV().EvtData.choices[number][1], SV().EvtData.choices[number][2])
+                ExecCommand(SV().EvtData.choices[number][2])
+                Sfx("confirm")
+            end
+            
+        end,
+        opening = function() 
+            print("event activated", SV("event_container").EvtId) 
+            SV().SelectionID = 1
+        end,
+        update = function(dt) end,
+        draw = function() 
+            if DebugMode then
+                G.print("DEBUG [ EvtId: "..SV().EvtId.." // SelectionID: "..SV().SelectionID.."]")
+            end
+            local text = SV().EvtData.body
+            local text_x = (G.getWidth() - Fonts.main:getWidth(text)) / 2 
+            local text_y = 100
+            G.setColor({0.2,0.2,0.2, 1})
+            G.rectangle("fill", text_x-10, text_y-10, Fonts.main:getWidth(text)+20, Fonts.main:getHeight()+20)
+            G.setColor({1, 1, 1, 1})
+            G.rectangle("line", text_x-10, text_y-10, Fonts.main:getWidth(text)+20, Fonts.main:getHeight()+20)
+            G.print(text, text_x, text_y)
+            
+            text_x = 20
+            text_y = 250
+            for i, opt in ipairs(SV().EvtData.choices) do
+                local mstr = tostring(i).." "..opt[1]
+                if DebugMode then mstr = mstr.." { "..opt[2].." }" end
+                if SV().SelectionID == i then
+                    G.setColor({0.7,0.2,0.2, 1})
+                    G.print("> "..mstr, text_x, text_y)
+                    G.setColor({1, 1, 1, 1})
+                else
+                    G.print(mstr, text_x, text_y)
+                end
+                
+                text_y = text_y + 20
+            end
+        end,
+        closing = function() end
     }
 }
 
+function DispatchEvent()
+    local valid_events = {}
+
+    for evt_id, event in pairs(Events) do
+        print("Checking event "..evt_id)
+        if type(event.conditions) == "string" then
+            print("string type")
+            if event.conditions == "*" then
+                table.insert(valid_events, evt_id)
+            else
+                local success, result = pcall(function()
+                    local chunk = load("return "..event.conditions)
+                    if chunk ~= nil then
+                        if chunk() == true then table.insert(valid_events, evt_id) end
+                    end
+                end)
+            end
+        elseif type(event.conditions) == "table" then
+            print("table type")
+            for _, cond in ipairs(event.conditions) do 
+                local success, result = pcall(function()
+                    local chunk = load("return "..cond)
+                    if chunk ~= nil then
+                        if table.contains(valid_events, evt_id) == false and chunk() == true then 
+                            table.insert(valid_events, evt_id) 
+                        end
+                    end
+                end)
+            end
+        end
+    end
+    print("Valid events: ", #valid_events)
+    if #valid_events == 0 then
+        Scene.set("ship_main")
+    elseif #valid_events == 1 then
+        ActivateEvent(valid_events[1])
+    else
+        local randomevt = valid_events[math.random(1, #valid_events)]
+        ActivateEvent(randomevt)
+    end    
+end
+
 AIScripts = {
-    --projectile_player = function(me)
-        --me:move_up(me.move_speed)
-        --me:execute(20)
-    --end,
+    meteor = function(me)
+        local x = me.x - me.sprite:getWidth()/2
+        local y = me.y - me.sprite:getHeight()/2
+        local ox = me.x + me.sprite:getWidth()/2
+        local oy = me.y + me.sprite:getHeight()/2
+
+        if x <= 0 or y <= 0 or ox >= G.getWidth() or oy >= G.getHeight() then 
+            me.velocity_y = -me.velocity_y-- + math.random(-1, 1)
+        end
+        if x <= 0 or ox >= G.getWidth() then 
+            me.velocity_x = -me.velocity_x-- + math.random(-1, 1)
+        end
+        me:execute(me.hit_damage)
+    end,
     projectile = function(me)
         me:move_forward(me.move_speed)
         me:execute(me.hit_damage)
@@ -318,6 +530,8 @@ function Entity:initialize(x, y)
     -- Generic variables container, useful to not clutter up the main namespace
     self.v = {}
     
+    self.player = false
+    
     -- Defining location on the screen
     self.x = x or 0
     self.y = y or 0
@@ -337,18 +551,24 @@ function Entity:initialize(x, y)
 
     -- Sprite info
     self.sprite = nil
-    self.size = 2
+    self.size = 1
     self.rotation = 0
     self.hidden = false
     
     -- Either index of entity, or special value, such as "player"
     self.id = nil
     
-    -- Generic switch for wether this is a projectile, for quick excemptions from routines that should only effect living entities
+    -- Generic switch for wether this is a projectile, for quick exclusion from routines that should only effect living entities
     self.projectile = false
+    
+    -- The spawner function to trigger when "fire" is called
+    self.projectile_spawner = Spawner.projectile1
     
     -- Generic switch for wether this is a pickup, some item on the field
     self.pickup = false
+    
+    -- Generic switch for inanimate objects in the field
+    self.decoration = false
     
     -- Check for if attacks should land/aggro with eachother
     self.alliance = 0
@@ -364,6 +584,8 @@ function Entity:initialize(x, y)
 
     -- Can only fire when this value is 0, decays by 1 each tick
     self.attack_cooldown = 0
+    
+    self.execute_cooldown = 0
 
     -- How much damage does this entity do when it hits another
     self.hit_damage = 20
@@ -386,11 +608,32 @@ function Entity:draw()
     
     G.draw(self.sprite, self.x, self.y, self.rotation, self.size, self.size, self.sprite:getWidth() / 2, self.sprite:getHeight() / 2)
     
-    --G.rectangle("fill", self.x - (self.sprite:getWidth() / 2), self.y - (self.sprite:getHeight() / 2), 1,1)
+    if DebugMode then
+        G.print("\nID: "..tostring(self.id).."\nALLIANCE: "..tostring(self.alliance).."\nOWNER: "..tostring(self.owner).."\nLOC: "..tostring(self.x).."."..tostring(self.y).."\nSPRITE: "..self.sprite:getWidth().."x"..self.sprite:getHeight(), self.x, self.y+20)
+        
+        local ox = self.sprite:getWidth()/2 
+        local oy = self.sprite:getHeight()/2 
+        G.rectangle("line", self.x - ox, self.y - oy, ox * 2, oy * 2)
+    end
+    
+end
+
+function Entity:fire(dir)
+    if dir == nil then dir = self.direction end
+    
+    if self.attack_cooldown > 0 then return end
+
+    self.projectile_spawner(self.x, self.y, self, dir)
+
+    -- Delay the players next shot
+    self.attack_cooldown = self.attack_delay
 end
 
 function Entity:sfx(name)
+    --print("sfx", self.id, name)
     local src = self.sounds[name]
+    
+    if src == nil then return end
     
     if src:isPlaying() then
         src:stop()
@@ -413,6 +656,7 @@ end
 -------------------------------------
 function Entity:tick()
     if self.attack_cooldown > 0 then self.attack_cooldown = self.attack_cooldown - 1 end
+    if self.execute_cooldown > 0 then self.execute_cooldown = self.execute_cooldown - 1 end
     self:cleanup_out_of_bounds()
 end
 
@@ -421,6 +665,7 @@ end
 -- @param s Distance to move.
 -------------------------------------
 function Entity:move_forward(s)
+    --print("dir", self.id, self.direction)
     self["move_"..self.direction](self, s)
     if self.direction == "right" then self.rotation = 1.6 end
     if self.direction == "down" then self.rotation = 3.15 end
@@ -449,46 +694,69 @@ end
 -- @param power Damage to hit for.
 -------------------------------------
 function Entity:execute(power, single_use)
+    if self.execute_cooldown > 0 then return end
+    
     if power == nil then power = 10 end
     if single_use == nil then single_use = true end
     
-    if self.projectile and self.alliance == 1 then
-        local ox = Player.sprite:getWidth()/2 
-        local oy = Player.sprite:getHeight()/2 
-        if self.x < Player.x + ox and self.x > Player.x - ox and self.y < Player.y + oy and self.y > Player.y - oy then
-            AddFloatingText({ x = Player.x, y = Player.y, text = power, float = true })
-            Player:take_damage(power)
+    --[[if self.projectile and self.alliance == 1 then
+        local p = Play er()
+        local ox = p.sprite:getWidth()/2 
+        local oy = p.sprite:getHeight()/2 
+        if self.x < p.x + ox and self.x > p.x - ox and self.y < p.y + oy and self.y > p.y - oy then
+            AddFloatingText({ x = p.x, y = p.y, text = power, float = true })
+            p:take_damage(power)
             if single_use == true then self:remove_from_world() end
-        end
-    elseif self.projectile and self.alliance == 0 then
+        end]]--
+    if self.projectile then
         for _, ent in ipairs(EntityList) do
-            if self.owner == ent.tag then return end
-            if ent.projectile then return end
-            if self.alliance == ent.alliance then return end 
-            if ent.projectile then return end
+            if ent.projectile then goto continue end
+            if ent.id == self.id then goto continue end
+            if self.alliance == ent.alliance then goto continue end 
+            --print(self.id, self.owner)
             local ox = ent.sprite:getWidth()/2 
             local oy = ent.sprite:getHeight()/2 
+
             if self.x < ent.x + ox and self.x >= ent.x - ox and self.y < ent.y + oy and self.y >= ent.y - oy then
                 AddFloatingText({ x = ent.x, y = ent.y, text = power, float = true })
                 ent:take_damage(power)
                 if single_use == true then self:remove_from_world() end
             end
+            ::continue::
         end
     elseif self.pickup then
         if self:get_distance_entity("player") <= 5 then
             CurrentSave.player.exp = CurrentSave.player.exp + power
             if single_use == true then self:remove_from_world() end
         end
+    elseif self.decoration then
+        --if self.velocity_x ~= 0 and self.velocity_y ~= 0 then
+            for _, ent in ipairs(EntityList) do
+                if ent.id == self.id then goto continue end
+                if self.alliance == ent.alliance then goto continue end
+                local ox = ent.sprite:getWidth()/2 
+                local oy = ent.sprite:getHeight()/2 
+                if self.x < ent.x + ox and self.x >= ent.x - ox and self.y < ent.y + oy and self.y >= ent.y - oy then
+                    AddFloatingText({ x = ent.x, y = ent.y, text = power, float = true })
+                    ent:take_damage(power)
+                    AddFloatingText({ x = self.x, y = self.y, text = math.round(power/3), float = true })
+                    self:take_damage(math.round(power/3))
+                    self.execute_cooldown = 50
+                end
+                ::continue::
+            end
+            
+        --end
     end
 end
 
 function Entity:take_damage(dam)
     self:sfx("hit")
     self.health = self.health - dam
-    if self.id == "player" then CurrentSave.player.health = self.health end
+    if self.player then CurrentSave.player.health = self.health end
     
     if self.health <= 0 then 
-        if self.id == "player" then
+        if self.player then
             self.health = 100 --TODO handle some death state
         else
             self:died() 
@@ -547,42 +815,6 @@ end
 -- Attach an AI script to this entity
 function Entity:attach(ai)
     self.ai = AIScripts[ai]
-end
-
-function Entity:fire(dir)
-    if dir == nil then dir = self.direction end
-    
-    if self.attack_cooldown > 0 then
-        return
-    end
-
-    local proj = Entity:new()
-    
-    proj.owner = self.id
-    proj.direction = dir
-
-    if self.id == "player" then
-        proj.projectile = true
-        proj.sprite = Sprites.projectile1
-        proj:move_to_entity("player")
-        proj:attach("projectile")
-        proj.move_speed = 10
-        
-        -- Play sound effect only for player shots
-        self:sfx("shoot")
-    else
-        proj.projectile = true
-        proj.alliance = 1
-        proj.sprite = Sprites.projectile2
-        proj:move_to_entity(self.id)
-        proj:attach("projectile")
-        proj.move_speed = 2
-    end
-
-    proj:add_to_world()
-
-    -- Delay the players next shot
-    self.attack_cooldown = self.attack_delay
 end
 
 function Entity:get_distance_entity(id)
@@ -701,10 +933,10 @@ function EnableMusic()
 end
 
 function GetEntity(id)
-    if id == "player" then return Player end
+    if id == "player" then return Player() end
 
     for _, ent in ipairs(EntityList) do
-        if ent.id == id then return ent end
+        if tostring(ent.id) == tostring(id) then return ent end
     end
 end
 
@@ -715,8 +947,9 @@ function AddFloatingText(data)
             direction = 0, float = data.float })
 end
 
-function SV()
-    return Scenes[Scene.name].vars
+function SV(name)
+    if name == nil then name = Scene.name end
+    return Scenes[name].vars
 end
 
 function PlayMusic(name)
@@ -840,11 +1073,14 @@ function DrawHUD()
         .. "|\n "
         .. tostring(x)
         .. "% "
-
-    --G.print("Health: "..tostring(Player.health), 0, 10)
+        
     G.print(gauge, 0, 15)
     
     G.print("EXP: "..tostring(CurrentSave.player.exp), 0, 50)
+    
+    if DebugMode then
+        G.print("Debug Mode Enabled", 0, 65)
+    end
 end
 
 -- Callbacks
@@ -878,11 +1114,16 @@ function love.load()
     Sounds.start = A.newSource("sounds/start.mp3", "static")
     Sounds.yay = A.newSource("sounds/yay.mp3", "static")
     
-    Sprites.player = G.newImage('sprites/player.png')
-    Sprites.enemy1 = G.newImage('sprites/enemy.png')
+    Sprites.player = G.newImage('sprites/playerblue.png')
+    Sprites.enemy1 = G.newImage('sprites/enemyb.png')
     Sprites.projectile1 = G.newImage('sprites/shot.png')
     Sprites.projectile2 = G.newImage('sprites/enemy_shot.png')
     Sprites.pow = G.newImage('sprites/pow.png')
+    Sprites.meteor1 = G.newImage('sprites/Meteors/meteorBrown_med1.png')
+    Sprites.meteor2 = G.newImage('sprites/Meteors/meteorBrown_med3.png')
+    Sprites.meteor3 = G.newImage('sprites/Meteors/meteorBrown_big1.png')
+    Sprites.meteor4 = G.newImage('sprites/Meteors/meteorBrown_big2.png')
+    Sprites.meteor5 = G.newImage('sprites/Meteors/meteorBrown_big3.png')
     
     -- Setting up save files
     if FS.getInfo(GlobalFileName) == nil then
@@ -895,7 +1136,7 @@ function love.load()
 
     -- Loading extra scripts
     local connect_extension = function(f)
-        f.gloals = _G
+        f.globals = _G
         if f.on_connect ~= nil then f.on_connect() end
         
         if f.scenes ~= nil then
@@ -916,20 +1157,28 @@ function love.load()
                 Spawner[k] = v
             end
         end
+        if f.events ~= nil then
+            for k, v in pairs(f.events) do
+                print("Linked Event "..k.." "..v.title)
+                Events[k] = v
+                print(#Events, Events[k].title)
+                --table.insert(Events, v)
+            end
+        end
+        print("Events:", #Events)
     end
+    
     local sc = love.filesystem.getDirectoryItems( "scripts" )
+    
     for _, item in ipairs(sc) do
         if string.ends_with(item, ".lua") then 
             print("Loading", love.filesystem.getSource().."scripts/"..item)
-            connect_extension(dofile(love.filesystem.getSource().."scripts/"..item))
-            
+            connect_extension(dofile(love.filesystem.getSource().."/scripts/"..item))
         end
     end
     
     -- Loading mods
-    if FS.getInfo("mods") == nil then
-        love.filesystem.createDirectory( "mods" )
-    end
+    if FS.getInfo("mods") == nil then love.filesystem.createDirectory( "mods" ) end
     
     local mods = love.filesystem.getDirectoryItems( "mods" )
     
@@ -1029,21 +1278,26 @@ ConsoleLog = {}
 ConsoleMsgs = {}
 
 function AddLog(t)
-    table.insert(ConsoleMsgs, 1, tostring(t))
+    table.insert(ConsoleLog, 1, tostring(t))
 end
 
 function HandleConsole()
     if ConsoleInput == "" then return end
     table.insert(ConsoleLog, 1, ConsoleInput)
     table.insert(ConsoleMsgs, 1, "$ "..ConsoleInput)
+    ExecCommand(ConsoleInput)
+    ConsoleInput = ""
+end
+
+function ExecCommand(cmdln)
     local cmd = ""
     local val = ""
     
     -- If there is spaces in the string, split the input so word 1 is the command and the rest is the parameters
-    if select(2, string.gsub(ConsoleInput, " ", "")) >= 1 then
-        cmd, val = string.match(ConsoleInput, "(%S+)%s(.*)")
+    if select(2, string.gsub(cmdln, " ", "")) >= 1 then
+        cmd, val = string.match(cmdln, "(%S+)%s(.*)")
     else
-        cmd = ConsoleInput
+        cmd = cmdln
     end
     
 
@@ -1064,9 +1318,18 @@ function HandleConsole()
                 AddLog("Error:" .. result)
             end
         end
+    elseif cmd == "goto" or cmd == "event" then
+        ActivateEvent(val)
+    elseif cmd == "scene" then
+        Scene.set(val)
+    elseif cmd == "debug" then
+        DebugMode = not DebugMode
+        AddLog("Debug Mode: "..tostring(DebugMode))
+    elseif cmd == "end" then
+        Scene.set("ship_main")
+    else
+        ExecCommand("run "..cmdln)
     end
-    
-    ConsoleInput = ""
 end
 
 function love.textinput(t)
@@ -1096,7 +1359,6 @@ function love.draw()
     end
     
     if ConsoleOpen then
-        
         local ci = "> "..ConsoleInput
         love.graphics.setColor({0,0,0, 1})
         love.graphics.rectangle("fill", 0, G.getHeight()-15, Fonts.main:getWidth(ci), Fonts.main:getHeight())
