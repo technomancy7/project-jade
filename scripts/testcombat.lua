@@ -27,14 +27,16 @@ return {
                 PlayMusic("space")
                 Scenes.combat.vars.Cooldown = 100
                 Scenes.combat.vars.PlayedVictory = false
+                
+                -- Reset the entity ID counter
                 LastID = 0
+                
                 -- Create the player
                 Spawner.player(500, 200)
 
-                -- Testing TODO remove later
+                -- Spawn the three testing enemies
                 local testEnemy = Spawner.basic_enemy(100, 100)
                 testEnemy.attack_delay = 90
-
 
                 local testEnemy2 = Spawner.basic_enemy(200, 200)
                 testEnemy2.attack_delay = 50
