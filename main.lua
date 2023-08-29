@@ -26,6 +26,7 @@ StoredMusic = nil
 Paused = false
 ConsoleOpen = false
 DebugMode = false
+GameSpeed = 1
 
 -- Containers
 Music = {}
@@ -77,9 +78,7 @@ GlobalSave = {
 }
 
 function Player()
-    for _, ent in ipairs(EntityList) do
-        if ent.player then return ent end
-    end
+    for _, ent in ipairs(EntityList) do if ent.player then return ent end end
 end
 
 Spawner = {
@@ -100,10 +99,11 @@ Spawner = {
         spawned.direction = "down"
         spawned:attach("stationary_enemy")
         spawned.attack_delay = 90
+        spawned.projectile_spawner = Spawner.projectile1_enemy
         spawned.sounds["hit"] = A.newSource("sounds/hit.mp3", "static")
         spawned.sounds["shoot"] = A.newSource("sounds/shoot.mp3", "static")
         
-        spawned.on_hit = function(me)
+        spawned.on_hit = function(me, instigator)
             if me.health <= 0 then
                 local r = math.random(1, 5)
                 
@@ -128,8 +128,6 @@ Spawner = {
         spawned.alliance = -1
         spawned.health = 10
         spawned.decoration = true
-        
-        -- TODO ai for meteors, set a low velocity
         
         spawned.velocity_x = math.random(-1, 1)
         spawned.velocity_y = math.random(-1, 1)
@@ -340,6 +338,7 @@ Scenes = {
         opening = function() 
             PlayMusic("code")
             SV().cooldown = 30
+            if CurrentSave.player.health <= 0 then CurrentSave.player.health = 5 end
         end,
         update = function(dt)
             for _, key in ipairs(GlobalSave.keys.confirm) do
@@ -645,18 +644,28 @@ end
 -- Clean up the entity if it goes out of bounds.
 -------------------------------------
 function Entity:cleanup_out_of_bounds()
-    if self.y < 0 then self:remove_from_world() end
-    if self.y > (G.getHeight()) then self:remove_from_world() end -- - self.sprite:getHeight()
-    if self.x < 0 then self:remove_from_world() end
-    if self.x > (G.getWidth()) then self:remove_from_world() end --  - self.sprite:getWidth()
+    local outbounds = false
+    if self.y < 0 then outbounds = true end
+    if self.y > (G.getHeight()) then outbounds = true end -- - self.sprite:getHeight()
+    if self.x < 0 then outbounds = true end
+    if self.x > (G.getWidth()) then outbounds = true end --  - self.sprite:getWidth()
+    
+    if outbounds then
+        if not self.player then
+            self:remove_from_world() 
+        end
+    end
 end
 
 -------------------------------------
 -- Callback that is run every tick.
 -------------------------------------
 function Entity:tick()
-    if self.attack_cooldown > 0 then self.attack_cooldown = self.attack_cooldown - 1 end
-    if self.execute_cooldown > 0 then self.execute_cooldown = self.execute_cooldown - 1 end
+    local m = 1 * GameSpeed
+    if self.attack_cooldown > 0 then self.attack_cooldown = self.attack_cooldown - m end
+    if self.execute_cooldown > 0 then self.execute_cooldown = self.execute_cooldown - m end
+    if self.attack_cooldown < 0 then self.attack_cooldown = 0 end
+    if self.execute_cooldown < 0 then self.execute_cooldown = 0 end
     self:cleanup_out_of_bounds()
 end
 
@@ -674,18 +683,22 @@ function Entity:move_forward(s)
 end
 
 function Entity:move_up(s)
+    s = s * GameSpeed
     self.y = self.y - s
 end
 
 function Entity:move_down(s)
+    s = s * GameSpeed
     self.y = self.y + s
 end
 
 function Entity:move_left(s)
+    s = s * GameSpeed
     self.x = self.x - s
 end
 
 function Entity:move_right(s)
+    s = s * GameSpeed
     self.x = self.x + s
 end
 
@@ -719,7 +732,7 @@ function Entity:execute(power, single_use)
 
             if self.x < ent.x + ox and self.x >= ent.x - ox and self.y < ent.y + oy and self.y >= ent.y - oy then
                 AddFloatingText({ x = ent.x, y = ent.y, text = power, float = true })
-                ent:take_damage(power)
+                ent:take_damage(power, self.owner)
                 if single_use == true then self:remove_from_world() end
             end
             ::continue::
@@ -738,9 +751,9 @@ function Entity:execute(power, single_use)
                 local oy = ent.sprite:getHeight()/2 
                 if self.x < ent.x + ox and self.x >= ent.x - ox and self.y < ent.y + oy and self.y >= ent.y - oy then
                     AddFloatingText({ x = ent.x, y = ent.y, text = power, float = true })
-                    ent:take_damage(power)
+                    ent:take_damage(power, self.id)
                     AddFloatingText({ x = self.x, y = self.y, text = math.round(power/3), float = true })
-                    self:take_damage(math.round(power/3))
+                    self:take_damage(math.round(power/3), ent.id)
                     self.execute_cooldown = 50
                 end
                 ::continue::
@@ -750,27 +763,35 @@ function Entity:execute(power, single_use)
     end
 end
 
-function Entity:take_damage(dam)
+function Entity:take_damage(dam, instigator)
+    --print("Instigated "..dam.." damage from "..instigator)
     self:sfx("hit")
     self.health = self.health - dam
     if self.player then CurrentSave.player.health = self.health end
     
     if self.health <= 0 then 
-        if self.player then
-            self.health = 100 --TODO handle some death state
-        else
-            self:died() 
-        end
+        --if self.player then
+            --self.health = 100 --TODO handle some death state
+        --else
+            local i = GetEntity(instigator)
+            local attribs = self.id
+            if self.projectile then attribs = self.owner end
+            if i ~= nil then i:score_kill(attribs) end
+            self:died(instigator) 
+        --end
     end
     
-    local has_died = self.health <= 0
+    --local has_died = self.health <= 0
     
     if self.on_hit ~= nil then
-        self:on_hit()
+        self:on_hit(instigator)
     end
 end
 
-function Entity:died()
+function Entity:score_kill(target)
+    print(self.id.." has killed "..target)
+end
+function Entity:died(instigator)
     self:remove_from_world()
 end
 
@@ -850,10 +871,10 @@ function Entity:shift_to_entity(id)
 end
 
 function Entity:shift_to(x, y)
-    if self.x < x then self.x = self.x + self.move_speed end
-    if self.x > x then self.x = self.x - self.move_speed end
-    if self.y < y then self.y = self.y + self.move_speed end
-    if self.y > y then self.y = self.y - self.move_speed end
+    if self.x < x then self.x = self.x + (self.move_speed * GameSpeed) end
+    if self.x > x then self.x = self.x - (self.move_speed * GameSpeed) end
+    if self.y < y then self.y = self.y + (self.move_speed * GameSpeed) end
+    if self.y > y then self.y = self.y - (self.move_speed * GameSpeed) end
 end
 
 function Entity:start_move(dir, amt)
@@ -882,36 +903,36 @@ function Entity:process_movement()
     if self.velocity_x > 0 then
         self.direction = "right"
         self.rotation = 1.6
-        self.velocity_x = self.velocity_x - self.velocity_decay
+        self.velocity_x = self.velocity_x - (self.velocity_decay * GameSpeed)
         if self.x < (G.getWidth() - (self.sprite:getWidth() / 2)) then
-            self.x = self.x + self.velocity_x
+            self.x = self.x + (self.velocity_x * GameSpeed)
         end
     end
 
     if self.velocity_y > 0 then
         self.direction = "down"
         self.rotation = 3.15
-        self.velocity_y = self.velocity_y - self.velocity_decay
+        self.velocity_y = self.velocity_y - (self.velocity_decay * GameSpeed)
         if self.y <  (G.getHeight() - (self.sprite:getHeight() / 2)) then
-            self.y = self.y + self.velocity_y
+            self.y = self.y + (self.velocity_y * GameSpeed)
         end
     end
 
     if self.velocity_x < 0 then
         self.direction = "left"
         self.rotation = 4.7
-        self.velocity_x = self.velocity_x + self.velocity_decay
+        self.velocity_x = self.velocity_x + (self.velocity_decay * GameSpeed)
         if self.x > (self.sprite:getWidth() / 2) then
-            self.x = self.x - -self.velocity_x
+            self.x = self.x - -(self.velocity_x * GameSpeed)
         end
     end
 
     if self.velocity_y < 0 then
         self.direction = "up"
         self.rotation = 0
-        self.velocity_y = self.velocity_y + self.velocity_decay
+        self.velocity_y = self.velocity_y + (self.velocity_decay * GameSpeed)
         if self.y > (self.sprite:getHeight() / 2) then
-            self.y = self.y - -self.velocity_y
+            self.y = self.y - -(self.velocity_y * GameSpeed)
         end
     end
 end
@@ -1327,6 +1348,8 @@ function ExecCommand(cmdln)
         AddLog("Debug Mode: "..tostring(DebugMode))
     elseif cmd == "end" then
         Scene.set("ship_main")
+    elseif cmd == "quit" then
+        love.event.quit()
     else
         ExecCommand("run "..cmdln)
     end

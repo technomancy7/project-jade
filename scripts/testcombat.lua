@@ -63,33 +63,32 @@ return {
             vars = {
                 ReverseBG = false,
                 Cooldown = 100,
-                PlayedVictory = false
+                PlayedVictory = false,
+                SpawnCooldown = 0,
+                kills = 0
+                --TODO victory condition, enemies spawn randomly if there is not many on screen, each one adds score, end when score > 5
             },
             keypress = function( key, scancode, isrepeat ) end,
             opening = function()
                 PlayMusic("space")
-                Scenes.combat.vars.Cooldown = 100
-                Scenes.combat.vars.PlayedVictory = false
+                SV().Cooldown = 100
+                SV().PlayedVictory = false
                 
                 -- Reset the entity ID counter
                 LastID = 0
                 
                 -- Create the player
                 Spawner.player(500, 200)
-
-                -- Spawn the three testing enemies
-                local testEnemy = Spawner.basic_enemy(100, 100)
-                testEnemy.attack_delay = 90
-                testEnemy.projectile_spawner = Spawner.projectile1_enemy
-
-                local testEnemy2 = Spawner.basic_enemy(200, 200)
-                testEnemy2.attack_delay = 50
-                testEnemy2.projectile_spawner = Spawner.projectile1_enemy
                 
-                local testEnemy3 = Spawner.basic_enemy(500, 50)
-                testEnemy3.attack_delay = 40
-                testEnemy3.projectile_spawner = Spawner.projectile1_enemy
 
+                local starts = math.random(1, 4)
+                for i = 0, starts do
+                    local ss = math.random(100, 500)
+                    local su = math.random(0, 150)
+                    local testEnemy = Spawner.basic_enemy(ss, su)
+                    testEnemy.attack_delay = math.random(50, 90)
+                end
+                
                 local r = math.random(1, 5)
                 for i = 0, r do
                     local nex = math.random(0, G.getWidth())
@@ -100,13 +99,15 @@ return {
                 
             end,
             update = function(dt)
+                if SV().SpawnCooldown > 0 then SV().SpawnCooldown = SV().SpawnCooldown - 1 end
+                
                 if #EntityList == 1 and Scenes.combat.vars.Cooldown >= 0 then
                     if SV().PlayedVictory == false then
                         Sfx("yay")
                         SV().PlayedVictory = true
                     end
-                    Scenes.combat.vars.Cooldown = Scenes.combat.vars.Cooldown - 1
-                    if Scenes.combat.vars.Cooldown == 0 then
+                    SV().Cooldown = SV().Cooldown - 1
+                    if SV().Cooldown == 0 then
                         Scene.set("ship_main")
                         return
                     end
@@ -115,11 +116,11 @@ return {
                 
                 if Scenes.combat.vars.ReverseBG then
                     BackgroundRGBA.R = BackgroundRGBA.R - 1
-                    if BackgroundRGBA.R < 50 then Scenes.combat.vars.ReverseBG = false end
+                    if BackgroundRGBA.R < 50 then SV().ReverseBG = false end
                     SetBG()
                 else
                     BackgroundRGBA.R = BackgroundRGBA.R + 1
-                    if BackgroundRGBA.R > 150 then Scenes.combat.vars.ReverseBG = true end
+                    if BackgroundRGBA.R > 150 then SV().ReverseBG = true end
                     SetBG()
                 end
                 
@@ -127,7 +128,12 @@ return {
                     Scene.set("ship_main") 
                     return
                 end 
+                
                 local p = Player()
+                if p == nil then 
+                    Scene.set("ship_main") 
+                    return
+                end
                 for _, key in ipairs(GlobalSave.keys.fire_right) do
                     if KB.isDown(key) then
                         p:fire("right")
@@ -187,14 +193,9 @@ return {
                 DrawHUD()
                 DoFloatingText()
 
-                for _, ent in ipairs(EntityList) do
-                    ent:draw()
-
-                end
+                for _, ent in ipairs(EntityList) do ent:draw() end
                 
-                if #EntityList == 1 then
-                    G.print("Encounter complete!", 300, 300)
-                end
+                if #EntityList == 1 then G.print("Encounter complete!", 300, 300) end
             end,
             closing = function()
                 print("Cleaning up "..tostring(#EntityList).." entities.")
