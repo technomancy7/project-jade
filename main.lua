@@ -81,6 +81,8 @@ function Player()
     for _, ent in ipairs(EntityList) do if ent.player then return ent end end
 end
 
+AIScripts = {}
+
 Spawner = {
     player = function(x, y)
         local p = Entity:new(x, y)
@@ -121,54 +123,6 @@ Spawner = {
         end
         
         spawned:add_to_world()
-        return spawned
-    end,
-    meteor1 = function(x, y) 
-        local spawned = Entity:new(x, y)
-        spawned.alliance = -1
-        spawned.health = 10
-        spawned.decoration = true
-        
-        spawned.velocity_x = math.random(-1, 1)
-        spawned.velocity_y = math.random(-1, 1)
-        spawned.velocity_decay = 0
-        spawned:attach("meteor")
-        
-        
-        spawned.sprite = Sprites["meteor"..tostring(math.random(1, 5))]
-
-        -- Add to the entity list
-        spawned:add_to_world()
-        
-        return spawned
-    end,
-    projectile1 = function(x, y, owner, direction) 
-        local spawned = Entity:new(x, y)
-        
-        -- Setting the projectile owner, to attribute damage done to the target to the entity who fired it
-        spawned.owner = owner.id
-        
-        -- Setting direction, if none defined in parameters, then inherit the owner's'
-        spawned.direction = direction or owner.direction
-        
-        -- Flag to say this is a projectile
-        spawned.projectile = true
-        
-        -- Attaching the AI script to make this behave like a projectile
-        spawned:attach("projectile")
-        
-        -- Setting the sprite
-        spawned.sprite = Sprites.projectile1
-        
-        -- How fast this moves
-        spawned.move_speed = 10
-        
-        -- Play sound effect only for player shots
-        owner:sfx("shoot")
-        
-        -- Add to the entity list
-        spawned:add_to_world()
-        
         return spawned
     end,
     projectile1_enemy = function(x, y, owner, direction) 
@@ -481,36 +435,6 @@ function DispatchEvent()
         ActivateEvent(randomevt)
     end    
 end
-
-AIScripts = {
-    meteor = function(me)
-        local x = me.x - me.sprite:getWidth()/2
-        local y = me.y - me.sprite:getHeight()/2
-        local ox = me.x + me.sprite:getWidth()/2
-        local oy = me.y + me.sprite:getHeight()/2
-
-        if x <= 0 or y <= 0 or ox >= G.getWidth() or oy >= G.getHeight() then 
-            me.velocity_y = -me.velocity_y-- + math.random(-1, 1)
-        end
-        if x <= 0 or ox >= G.getWidth() then 
-            me.velocity_x = -me.velocity_x-- + math.random(-1, 1)
-        end
-        me:execute(me.hit_damage)
-    end,
-    projectile = function(me)
-        me:move_forward(me.move_speed)
-        me:execute(me.hit_damage)
-    end, 
-    stationary_enemy = function(me)
-        me:fire()
-    end, 
-    orb = function(me)
-        if me:get_distance_entity("player") < 200 then
-            me:shift_to_entity("player")
-            me:execute(20)
-        end
-    end,
-}
 
 BackgroundRGBA = {
     R = 0,
@@ -1182,7 +1106,7 @@ function love.load()
             for k, v in pairs(f.events) do
                 print("Linked Event "..k.." "..v.title)
                 Events[k] = v
-                print(#Events, Events[k].title)
+                --print(#Events, Events[k].title)
                 --table.insert(Events, v)
             end
         end
