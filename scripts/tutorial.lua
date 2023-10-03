@@ -49,15 +49,31 @@ return {
             
             -- if get_input is present, choices are not shown, instead it will be a text box for getting user input
             -- the input text is then used for the $input value in the on_send paramater
-            get_input = {default_text = "PlayerData().name", run = "PlayerData().name = \"INPUT\" | goto awakening3"}
+            get_input = {default_text = "PlayerData().name", run = "PlayerData().name = \"|input|\" | goto awakening3"}
         },
         awakening3 = {
             title = "Awakening",
             conditions = nil,
             body = [[
             "Checking |PlayerData().name|...
-            Yes, that does appear to be correct."
-            ]]
+            Yes, that does appear to be correct.
+            And just for verification purposes, what is the name of your ship?"
+            ]],
+            get_input = {default_text = "PlayerData().ship_name", run = "PlayerData().ship_name = \"|input|\" | goto awakening4"}
+        },
+        awakening4 = {
+            title = "Awakening",
+            conditions = nil,
+            body = [[
+            "|PlayerData().ship_name|, correct...
+            Now for the briefing. The ship has been drifting in space for ERROR years.
+            We should return to Earth.
+            First, you should awaken your crew.
+            "
+            ]],
+            choices = {
+                {"[Begin mission] (TODO)", "end | STORY.add_crew(CurrentSave.player.name)"}
+            }
         },
     },
     -- Table that is merged in to the global scenes

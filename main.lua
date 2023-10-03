@@ -5,24 +5,19 @@
 
 local class = require 'middleclass'
 local techno = require 'techno'
+STORY = require 'abyssal' --TODO add way to change story
 JSON = require "json"
 
-local function regexEscape(str)
-    return str:gsub("[%(%)%.%%%+%-%*%?%[%^%$%]]", "%%%1")
-end
--- you can use return and set your own name if you do require() or dofile()
 
--- like this: str_replace = require("string-replace")
--- return function (str, this, that) -- modify the line below for the above to work
-string.xreplace = function (str, this, that)
-    return str:gsub(regexEscape(this), that:gsub("%%", "%%%%")) -- only % needs to be escaped for 'that'
-end
-            
 -- TODO
 --[[
 remake the floating text as entities instead of their own system
 add the expanding/contracting rings idea also as an entity
+
+move more story-specific functions to the story file (abyssal.lua)
 ]]--
+
+
 -- Constants
 
 GlobalFileName = "global.json"
@@ -71,6 +66,7 @@ DefaultSave = {
     world = {
         level = 1
     },
+    crew = {},
     flags = {
         done_tutorial = false
     }
@@ -117,6 +113,16 @@ AIScripts = {}
 
 Spawner = {
     player = function(x, y)
+        local p = Entity:new(x, y)
+        p.sprite = Sprites.player
+        p.health = CurrentSave.player.health
+        p.sounds["hit"] = A.newSource("sounds/hit.mp3", "static")
+        p.sounds["shoot"] = A.newSource("sounds/shoot.mp3", "static")
+        p:add_to_world()
+        p.player = true
+        return p
+    end,
+    crew = function(x, y, crew_member)
         local p = Entity:new(x, y)
         p.sprite = Sprites.player
         p.health = CurrentSave.player.health
@@ -209,7 +215,8 @@ Scenes = {
                     GlobalSave.system.savefile = SV().SelectedSlot
                     if LoadSave() then
                         if not CurrentSave.flags.done_tutorial then
-                            ActivateEvent("awakening")
+                            ActivateEvent(STORY.start_scene)
+                            
                         else
                             Scene.set("ship_main")
                         end
@@ -327,7 +334,12 @@ Scenes = {
             searching_for_event = false,
             search_time = 0
         },
-        keypress = function( key, scancode, isrepeat ) end,
+        keypress = function( key, scancode, isrepeat ) 
+            if key == "f2" then 
+                WriteSave()
+                print("Saved.")
+            end
+        end,
         opening = function() 
             PlayMusic("code")
             SV().cooldown = 30
@@ -336,6 +348,7 @@ Scenes = {
             if CurrentSave.player.health <= 0 then CurrentSave.player.health = 5 end
             
             -- TODO make a toggle for whether or not to auto-save
+            print("Saving.")
             WriteSave()
         end,
         update = function(dt)
@@ -398,11 +411,14 @@ Scenes = {
                 FadeBGTo(0, 0, 0)
                 DrawHUD()
                 
-                if Scenes.ship_main.vars.cooldown == 0 then
+                if SV().cooldown == 0 then
                     G.print(" | Press "..GetKey("confirm").." to launch.", 400, 0)
                 else
-                    G.print(" | Engines charging: "..tostring(Scenes.ship_main.vars.cooldown), 400, 0)
+                    G.print(" | Engines charging: "..tostring(SV().cooldown), 400, 0)
                 end
+                
+                G.print("Crew: "..tostring(#CurrentSave.crew), 0, 400)
+                G.print("Crew 1: "..CurrentSave.crew[1].name, 0, 425)
             end
 
         end,
@@ -418,6 +434,7 @@ Scenes = {
             cooldown = 25
         },
         keypress = function( key, scancode, isrepeat ) 
+            if SV().EvtData == nil then return end
             if SV().EvtData.choices ~= nil then
                 if table.has_value(GlobalSave.keys.move_up, key) or table.has_value(GlobalSave.keys.fire_up, key) then
                     if SV().SelectionID > 1 then
@@ -437,6 +454,7 @@ Scenes = {
                     print(SV().EvtData.choices[SV().SelectionID][1], SV().EvtData.choices[SV().SelectionID][2])
                     ExecCommand(SV().EvtData.choices[SV().SelectionID][2])
                     Sfx("confirm")
+                    return
                 end
                 
                 local number = tonumber(key)
@@ -454,7 +472,7 @@ Scenes = {
                 
                 if key == "return" and SV().cooldown <= 0 then
                     if SV().EvtData.get_input.run ~= nil then
-                        ExecCommand(SV().EvtData.get_input.run:gsub("INPUT", SV().input_text))
+                        ExecCommand(SV().EvtData.get_input.run:gsub("|input|", SV().input_text))
                         --"\""..SV().input_text.."\""))
                     end
                 end
@@ -501,12 +519,9 @@ Scenes = {
             end
             
             local text = SV().EvtData.body
-            local copyt = text
-            copyt:gsub("|(.-)|", function(match)
-            --for _, match in ipairs(matches) do
+            text:gsub("|(.-)|", function(match)
                 print("getting "..match)
                 local reps = ExecCommand("get "..match)
-                --local toget = string.gsub("|"..match.."|", "%(", "%%%(")
                 local toget = string.gsub("|"..match.."|", "[()]", "%%%1")
                 print("replacing "..toget.." with "..reps)
                 text = text:gsub(toget, reps)
@@ -547,6 +562,11 @@ Scenes = {
             if DebugMode then
                 G.print("DEBUG [ EvtId: "..SV().EvtId.." // SelectionID: "..SV().SelectionID.." // CD "..SV().cooldown.."]")
             end
+            
+            local title = SV().EvtData.title
+            G.print(title, (G.getWidth() - Fonts.main:getWidth(title)) / 2 , 50)
+            
+            
             local lines = 0
 
             local text = SV().modified_text
@@ -570,11 +590,14 @@ Scenes = {
             text_y = 250
             
             if SV().EvtData.get_input ~= nil then
-                G.setColor({0.2,0.2,0.2, 1})
-                G.rectangle("fill", text_x-10, text_y-10, Fonts.main:getWidth(text)+20, Fonts.main:getHeight() + 20)
-                G.setColor({1, 1, 1, 1})
-                G.rectangle("line", text_x-10, text_y-10, Fonts.main:getWidth(text)+20, Fonts.main:getHeight() + 20)
+                G.print("Input text: ", text_x, text_y-25)
+                G.setColor({0.6,0.2,0.2, 1})
+                G.rectangle("fill", text_x-10, text_y-10, G.getWidth()-20, Fonts.main:getHeight() + 20)
+                G.setColor({0.8, 0.8, 0.8, 1})
+                G.rectangle("line", text_x-10, text_y-10, G.getWidth()-20, Fonts.main:getHeight() + 20)
                 G.print(SV().input_text.."_", text_x, text_y)
+                G.setColor({1, 1, 1, 1})
+                G.print("(Enter)", G.getWidth()-100, text_y+25)
             end
             
             if SV().EvtData.choices ~= nil then
@@ -1521,15 +1544,20 @@ function ExecCommand(cmdln)
                 AddLog("Error:" .. result)
             end
         end
+        return true
     elseif cmd == "goto" or cmd == "event" then
         ActivateEvent(val)
+        return true
     elseif cmd == "scene" then
         Scene.set(val)
+        return true
     elseif cmd == "debug" then
         DebugMode = not DebugMode
         AddLog("Debug Mode: "..tostring(DebugMode))
+        return true
     elseif cmd == "end" then
         Scene.set("ship_main")
+        return true
     elseif cmd == "quit" then
         love.event.quit()
     elseif cmd == "get" then
@@ -1538,14 +1566,14 @@ function ExecCommand(cmdln)
         local func = load(str)
         return func()
     else
-        local handled = false
         for k, v in pairs(CustomCommands) do
             if cmd == k then 
                 v(val)
             end
         end
-        ExecCommand("run "..cmdln)
+        return ExecCommand("run "..cmdln)
     end
+    return nil
 end
 
 function love.textinput(t)
