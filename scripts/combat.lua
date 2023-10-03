@@ -4,10 +4,7 @@ return {
     name = "testcombat",
     
     -- Author name
-    author = "Techno",
-    
-    -- Container that gets filled with the main runtime global functions
-    globals = {},
+    author = "Technomancer",
     
     -- Function that runs on loading, if any setup is needed
     on_connect = function()
@@ -17,16 +14,29 @@ return {
     events = {
         testalt = {
             title = "A test encounter?",
-            conditions = {"true == true", "1 == 1"},
-            body = "There's nothing here!?",
+            conditions = {"true == true"},
+            body = [[
+            There's nothing here!?
+            why?
+            ]],
             choices = {
                 {"Okay! [back to ship]", "end"},
                 {"Wait, what's that over there!", "goto test2"},
+                {"Start Tutorial", "goto awakening"}
+            }
+        },
+        need_help = {
+            title = "Need some help?",
+            conditions = {"CurrentSave.player.fuel <= 10"},
+            body = "Here's something to keep you going.",
+            choices = {
+                {"Okay! [1000 fuel, back to ship]", "CurrentSave.player.fuel = 1000 | end"},
+                {"Nah, I'm good.", "end"},
             }
         },
         test1 = {
             title = "A test encounter!",
-            conditions = {"true == true", "1 == 1"},
+            conditions = {"true == true"},
             body = "Some dummy ships are hanging around in space, shoot them down.",
             choices = {
                 {"Okay! [start combat]", "scene combat"},
@@ -53,7 +63,8 @@ return {
             -- end  =  go back to the ship scene, essentially sugar for `scene ship_main`
             choices = {
                 {"Okay! [start combat]", "scene combat"},
-                {"Nah, I'm good [back to ship]", "end"}
+                {"Nah, I'm good [back to ship]", "end"},
+                {"Go to tutorial", "goto awakening"}
             }
         },
     },

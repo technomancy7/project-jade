@@ -7,12 +7,30 @@ local class = require 'middleclass'
 local techno = require 'techno'
 JSON = require "json"
 
+local function regexEscape(str)
+    return str:gsub("[%(%)%.%%%+%-%*%?%[%^%$%]]", "%%%1")
+end
+-- you can use return and set your own name if you do require() or dofile()
+
+-- like this: str_replace = require("string-replace")
+-- return function (str, this, that) -- modify the line below for the above to work
+string.xreplace = function (str, this, that)
+    return str:gsub(regexEscape(this), that:gsub("%%", "%%%%")) -- only % needs to be escaped for 'that'
+end
+            
+-- TODO
+--[[
+remake the floating text as entities instead of their own system
+add the expanding/contracting rings idea also as an entity
+]]--
 -- Constants
+
 GlobalFileName = "global.json"
 Green = {0, 1, 0}
 Red = {1, 0, 0}
 
 -- Aliases
+
 G = love.graphics
 KB = love.keyboard
 FS = love.filesystem
@@ -20,6 +38,7 @@ M = love.mouse
 A = love.audio
 
 -- Variables
+
 SaveDir = nil
 CurrentMusic = nil
 StoredMusic = nil
@@ -27,8 +46,10 @@ Paused = false
 ConsoleOpen = false
 DebugMode = false
 GameSpeed = 1
-
+TotalDelta = 0
+TotalSeconds = 0
 -- Containers
+
 Music = {}
 MusicNames = {}
 Sounds = {}
@@ -36,6 +57,7 @@ Sprites = {}
 Fonts = {}
 EntityList = {}
 
+-- Template save file to use for creating new ones
 DefaultSave = {
     player = {
         name = "Testing",
@@ -43,15 +65,25 @@ DefaultSave = {
         supplies = 1000,
         health = 100,
         level = 1,
-        exp = 0
+        exp = 0,
+        ship_name = "Nameless"
     },
     world = {
         level = 1
+    },
+    flags = {
+        done_tutorial = false
     }
 }
 
-CurrentSave = {}
+-- Current safe file data
+CurrentSave = DefaultSave
 
+function PlayerData()
+    return CurrentSave.player
+end
+
+-- Universal settings stored outside of individual save file scope
 GlobalSave = {
     system = {
         savefile = 0,
@@ -63,24 +95,24 @@ GlobalSave = {
         move_right = { "d" },
         move_left = { "a"},
         confirm = { "return", "space" },
+        cancel = { "c" },
         fire_up = { "up" },
         fire_down = { "down" },
         fire_right = { "right" },
         fire_left = { "left" },
-        special1 = { "z", "1" },
-        special2 = { "x", "2" },
-        special3 = { "c", "3" },
-        special4 = { "v", "4" },
-        special5 = { "b", "5" },
-        special6 = { "n", "6" },
-        special7 = { "m", "7" },
+        command_menu = { "z", "1" },
     }
 }
 
+-- Get the current Player entity
 function Player()
     for _, ent in ipairs(EntityList) do if ent.player then return ent end end
 end
 
+-- Container for custom command line actions, also used for Events triggers
+CustomCommands = {}
+
+-- Container for AI scripts, how entities should behave
 AIScripts = {}
 
 Spawner = {
@@ -176,7 +208,11 @@ Scenes = {
             if table.has_value(GlobalSave.keys.confirm, key) then
                     GlobalSave.system.savefile = SV().SelectedSlot
                     if LoadSave() then
-                        Scene.set("ship_main")
+                        if not CurrentSave.flags.done_tutorial then
+                            ActivateEvent("awakening")
+                        else
+                            Scene.set("ship_main")
+                        end
                         Sfx("confirm")
                         return
                     else
@@ -237,7 +273,7 @@ Scenes = {
             SetBG()
             
             G.print(GetKey("confirm").." to select save file", 0, 0)
-            G.print("Music: "..tostring(GlobalSave.system.music), 400, 0)
+            G.print("Music: "..tostring(GlobalSave.system.music).." (F11)", 400, 0)
             local x_off = 0
             local y_off = 40
             
@@ -286,113 +322,293 @@ Scenes = {
     ship_main = {
         vars = {
             -- Cooldown for activator that enables heading to event
-            cooldown = 0
+            cooldown = 0,
+            
+            searching_for_event = false,
+            search_time = 0
         },
         keypress = function( key, scancode, isrepeat ) end,
         opening = function() 
             PlayMusic("code")
             SV().cooldown = 30
+            SV().searching_for_event = false
+            SV().search_time = 0
             if CurrentSave.player.health <= 0 then CurrentSave.player.health = 5 end
+            
+            -- TODO make a toggle for whether or not to auto-save
+            WriteSave()
         end,
         update = function(dt)
+            if SV().searching_for_event then 
+                for _, key in ipairs(GlobalSave.keys.cancel) do
+                    if KB.isDown(key) then
+                        SV().searching_for_event = false
+                        SV().search_time = 0
+                        SV().cooldown = 30
+                        return
+                    end
+                end
+                return
+            end
+            
             for _, key in ipairs(GlobalSave.keys.confirm) do
                 if KB.isDown(key) and SV().cooldown == 0 then
-                    DispatchEvent()
+                    --DispatchEvent()
                     Sfx("start")
+                    SV().searching_for_event = true
                     return
                 end
             end
+            
             if KB.isDown("f12") then 
                 Scene.set("menu_main") 
                 return
             end
+            
             if SV().cooldown > 0 then SV().cooldown = SV().cooldown - 1 end
         end,
-        draw = function() 
-            if BackgroundRGBA.R > 0 then BackgroundRGBA.R = BackgroundRGBA.R - 1 end
-            if BackgroundRGBA.G > 0 then BackgroundRGBA.G = BackgroundRGBA.G - 1 end
-            if BackgroundRGBA.B > 0 then BackgroundRGBA.B = BackgroundRGBA.B - 1 end
-            SetBG()
-            DrawHUD()
-            
-            if Scenes.ship_main.vars.cooldown == 0 then
-                G.print(" | Press "..GetKey("confirm").." to start.", 400, 0)
-            else
-                G.print(" | "..tostring(Scenes.ship_main.vars.cooldown), 400, 0)
+        second = function()
+            if SV().searching_for_event then
+                SV().search_time = SV().search_time + 1
+                PlayerData().fuel = PlayerData().fuel - 1
+                
+                local randomNum = math.random(1, 50)
+                if randomNum <= SV().search_time then
+                    DispatchEvent()
+                end
             end
+        end,
+        draw = function() 
+            if SV().searching_for_event then
+                FadeBGTo(100, 25, 25)
+                
+                if TotalSeconds % 3 == 0 then
+                    G.print(" Drifting in the depths of space..", 0, 250)
+                    
+                elseif TotalSeconds % 3 == 1 then
+                    G.print(" Drifting in the depths of space...", 0, 250)
+                    
+                elseif TotalSeconds % 3 == 2 then
+                    G.print(" Drifting in the depths of space....", 0, 250)
+                end
+                G.print(" "..tostring(SV().search_time).." seconds since last event.", 0, 270)
+                G.print(" "..tostring(PlayerData().fuel).." fuel remaining.", 0, 290)
+                G.print(GetKey("cancel").." to stop the engines.", 400, 0)
+            else
+                FadeBGTo(0, 0, 0)
+                DrawHUD()
+                
+                if Scenes.ship_main.vars.cooldown == 0 then
+                    G.print(" | Press "..GetKey("confirm").." to launch.", 400, 0)
+                else
+                    G.print(" | Engines charging: "..tostring(Scenes.ship_main.vars.cooldown), 400, 0)
+                end
+            end
+
         end,
         closing = function() end
     },
     event_container = {
         vars = {
-            SelectionID = 1
+            SelectionID = 1,
+            tt_text = "",
+            tt_opts = {},
+            modified_text = "",
+            input_text = "",
+            cooldown = 25
         },
         keypress = function( key, scancode, isrepeat ) 
-            if table.has_value(GlobalSave.keys.move_up, key) or table.has_value(GlobalSave.keys.fire_up, key) then
-                if SV().SelectionID > 1 then
-                    SV().SelectionID = SV().SelectionID - 1
-                    Sfx("button")
+            if SV().EvtData.choices ~= nil then
+                if table.has_value(GlobalSave.keys.move_up, key) or table.has_value(GlobalSave.keys.fire_up, key) then
+                    if SV().SelectionID > 1 then
+                        SV().SelectionID = SV().SelectionID - 1
+                        Sfx("button")
+                    end
+                end
+                
+                if table.has_value(GlobalSave.keys.move_down, key) or table.has_value(GlobalSave.keys.fire_down, key) then
+                    if SV().SelectionID < #SV().EvtData.choices then
+                        SV().SelectionID = SV().SelectionID + 1
+                        Sfx("button")
+                    end
+                end
+                
+                if table.has_value(GlobalSave.keys.confirm, key) and SV().cooldown == 0 then
+                    print(SV().EvtData.choices[SV().SelectionID][1], SV().EvtData.choices[SV().SelectionID][2])
+                    ExecCommand(SV().EvtData.choices[SV().SelectionID][2])
+                    Sfx("confirm")
+                end
+                
+                local number = tonumber(key)
+                if number and number >= 1 and number <= #SV().EvtData.choices then
+                    print(SV().EvtData.choices[number][1], SV().EvtData.choices[number][2])
+                    ExecCommand(SV().EvtData.choices[number][2])
+                    Sfx("confirm")
                 end
             end
             
-            if table.has_value(GlobalSave.keys.move_down, key) or table.has_value(GlobalSave.keys.fire_down, key) then
-                if SV().SelectionID < #SV().EvtData.choices then
-                    SV().SelectionID = SV().SelectionID + 1
-                    Sfx("button")
+            if SV().EvtData.get_input ~= nil then
+                if key == "backspace" then
+                    SV().input_text = string.sub(SV().input_text, 1, -2)
                 end
-            end
-            
-            if table.has_value(GlobalSave.keys.confirm, key) then
-                print(SV().EvtData.choices[SV().SelectionID][1], SV().EvtData.choices[SV().SelectionID][2])
-                ExecCommand(SV().EvtData.choices[SV().SelectionID][2])
-                Sfx("confirm")
-            end
-            
-            local number = tonumber(key)
-            if number and number >= 1 and number <= #SV().EvtData.choices then
-                print(SV().EvtData.choices[number][1], SV().EvtData.choices[number][2])
-                ExecCommand(SV().EvtData.choices[number][2])
-                Sfx("confirm")
+                
+                if key == "return" and SV().cooldown <= 0 then
+                    if SV().EvtData.get_input.run ~= nil then
+                        ExecCommand(SV().EvtData.get_input.run:gsub("INPUT", SV().input_text))
+                        --"\""..SV().input_text.."\""))
+                    end
+                end
             end
             
         end,
         opening = function() 
+            local function deindent(str)
+                local lines = {}
+                for line in str:gmatch("[^\r\n]+") do
+                    table.insert(lines, line)
+                end
+                local minIndent = math.huge
+                for _, line in ipairs(lines) do
+                    local indent = line:match("^%s*")
+                    if #indent > 0 and #indent < minIndent then
+                    minIndent = #indent
+                    end
+                end
+                for i, line in ipairs(lines) do
+                    lines[i] = line:sub(minIndent + 1)
+                end
+                return table.concat(lines, "\n")
+            end
             print("event activated", SV("event_container").EvtId) 
             SV().SelectionID = 1
-        end,
-        update = function(dt) end,
-        draw = function() 
-            if DebugMode then
-                G.print("DEBUG [ EvtId: "..SV().EvtId.." // SelectionID: "..SV().SelectionID.."]")
+            SV().tt_text = ""
+            SV().tt_opts = {}
+            SV().input_text = ""
+            SV().cooldown = 25
+            
+            if SV().EvtData.get_input ~= nil and SV().EvtData.get_input.default_text ~= nil then
+                print("RUNNING get "..SV().EvtData.get_input.default_text)
+                local t = ExecCommand("get "..SV().EvtData.get_input.default_text)
+                if t ~= nil then
+                    SV().input_text = t
+                end
             end
+            
+            if SV().EvtData.choices ~= nil then
+                for i, _ in ipairs(SV().EvtData.choices) do
+                    SV().tt_opts[i] = ""
+                end
+            end
+            
             local text = SV().EvtData.body
+            local copyt = text
+            copyt:gsub("|(.-)|", function(match)
+            --for _, match in ipairs(matches) do
+                print("getting "..match)
+                local reps = ExecCommand("get "..match)
+                --local toget = string.gsub("|"..match.."|", "%(", "%%%(")
+                local toget = string.gsub("|"..match.."|", "[()]", "%%%1")
+                print("replacing "..toget.." with "..reps)
+                text = text:gsub(toget, reps)
+                print("post edit: ", text)
+            --end
+            end)
+            
+
+            SV().modified_text = deindent(text)
+            
+        end,
+        update = function(dt) 
+            if SV().cooldown > 0 then SV().cooldown = SV().cooldown - 1 end
+            if SV().modified_text ~= SV().tt_text then
+                local cursor = #SV().tt_text + 1
+                local extractedChar = string.sub(SV().modified_text, cursor, cursor)
+                SV().tt_text = SV().tt_text .. extractedChar
+            end
+            
+            if SV().EvtData.choices ~= nil then
+                for i, opt in ipairs(SV().EvtData.choices) do
+                    local cursor = #SV().tt_opts[i] + 1
+                    if SV().tt_opts[i] == opt[1] then return end
+                    local extractedChar = string.sub(opt[1], cursor, cursor)
+                    SV().tt_opts[i] = SV().tt_opts[i] .. extractedChar
+                end
+            end
+            
+        end,
+        second = function()
+            --if SV().cooldown > 0 then SV().cooldown = SV().cooldown - 1 end
+        end,
+        textinput = function(t)
+            SV().input_text = SV().input_text .. t
+        end,
+        draw = function() 
+            FadeBGTo(0, 0, 0)
+            if DebugMode then
+                G.print("DEBUG [ EvtId: "..SV().EvtId.." // SelectionID: "..SV().SelectionID.." // CD "..SV().cooldown.."]")
+            end
+            local lines = 0
+
+            local text = SV().modified_text
+
             local text_x = (G.getWidth() - Fonts.main:getWidth(text)) / 2 
             local text_y = 100
+            
+            for _ in text:gmatch("\n") do lines = lines + 1 end
+            
+            local rectHeight = Fonts.main:getHeight() + 20
+            
+            if lines > 0 then rectHeight = ((rectHeight - 20) * lines) + 20 end
+            
             G.setColor({0.2,0.2,0.2, 1})
-            G.rectangle("fill", text_x-10, text_y-10, Fonts.main:getWidth(text)+20, Fonts.main:getHeight()+20)
+            G.rectangle("fill", text_x-10, text_y-10, Fonts.main:getWidth(text)+20, rectHeight)
             G.setColor({1, 1, 1, 1})
-            G.rectangle("line", text_x-10, text_y-10, Fonts.main:getWidth(text)+20, Fonts.main:getHeight()+20)
-            G.print(text, text_x, text_y)
+            G.rectangle("line", text_x-10, text_y-10, Fonts.main:getWidth(text)+20, rectHeight)
+            G.print(SV().tt_text, text_x, text_y)
             
             text_x = 20
             text_y = 250
-            for i, opt in ipairs(SV().EvtData.choices) do
-                local mstr = tostring(i).." "..opt[1]
-                if DebugMode then mstr = mstr.." { "..opt[2].." }" end
-                if SV().SelectionID == i then
-                    G.setColor({0.7,0.2,0.2, 1})
-                    G.print("> "..mstr, text_x, text_y)
-                    G.setColor({1, 1, 1, 1})
-                else
-                    G.print(mstr, text_x, text_y)
+            
+            if SV().EvtData.get_input ~= nil then
+                G.setColor({0.2,0.2,0.2, 1})
+                G.rectangle("fill", text_x-10, text_y-10, Fonts.main:getWidth(text)+20, Fonts.main:getHeight() + 20)
+                G.setColor({1, 1, 1, 1})
+                G.rectangle("line", text_x-10, text_y-10, Fonts.main:getWidth(text)+20, Fonts.main:getHeight() + 20)
+                G.print(SV().input_text.."_", text_x, text_y)
+            end
+            
+            if SV().EvtData.choices ~= nil then
+                for i, opt in ipairs(SV().EvtData.choices) do
+                    local mstr = tostring(i).." "..SV().tt_opts[i]
+                    
+                    if DebugMode then mstr = mstr.." { "..opt[2].." }" end
+                    
+                    if SV().SelectionID == i then
+                        G.setColor({0.7,0.2,0.2, 1})
+                        G.print("> "..mstr, text_x, text_y)
+                        G.setColor({1, 1, 1, 1})
+                    else
+                        G.print(mstr, text_x, text_y)
+                    end
+                    
+                    text_y = text_y + 20
                 end
-                
-                text_y = text_y + 20
             end
         end,
         closing = function() end
     }
 }
+
+function FadeBGTo(r, g, b, scale)
+    if scale == nil then scale = 1 end
+    if BackgroundRGBA.R > r then BackgroundRGBA.R = BackgroundRGBA.R - scale end
+    if BackgroundRGBA.G > g then BackgroundRGBA.G = BackgroundRGBA.G - scale end
+    if BackgroundRGBA.B > b then BackgroundRGBA.B = BackgroundRGBA.B - scale end
+    if BackgroundRGBA.R < r then BackgroundRGBA.R = BackgroundRGBA.R + scale end
+    if BackgroundRGBA.G < g then BackgroundRGBA.G = BackgroundRGBA.G + scale end
+    if BackgroundRGBA.B < b then BackgroundRGBA.B = BackgroundRGBA.B + scale end
+    SetBG()
+end
 
 function DispatchEvent()
     local valid_events = {}
@@ -1082,35 +1298,59 @@ function love.load()
     -- Loading extra scripts
     local connect_extension = function(f)
         f.globals = _G
-        if f.on_connect ~= nil then f.on_connect() end
+        print("Adding extension: ",f.name)
+        local rancscript = false
+        local iscenes = 0
+        local iai = 0
+        local ispawners = 0
+        local ievents = 0
+        local icmd = 0
+        
+        if f.on_connect ~= nil then 
+            f.on_connect() 
+            rancscript = true
+        end
         
         if f.scenes ~= nil then
             for k, v in pairs(f.scenes) do
-                print("Linked scene "..k)
+                print("Linked scene:      ",k)
                 Scenes[k] = v
+                iscenes = iscenes + 1
             end
         end
         if f.ai_scripts ~= nil then
             for k, v in pairs(f.ai_scripts) do
-                print("Linked AI script "..k)
+                print("Linked AI script: ", k)
                 AIScripts[k] = v
+                iai = iai + 1
             end
         end
         if f.spawners ~= nil then
             for k, v in pairs(f.spawners) do
-                print("Linked Spawner "..k)
+                print("Linked Spawner: ",k)
                 Spawner[k] = v
+                ispawners = ispawners + 1
             end
         end
         if f.events ~= nil then
             for k, v in pairs(f.events) do
-                print("Linked Event "..k.." "..v.title)
+                print("Linked Event:      ", k.." // "..v.title)
                 Events[k] = v
-                --print(#Events, Events[k].title)
-                --table.insert(Events, v)
+                ievents = ievents + 1
             end
         end
-        print("Events:", #Events)
+        if f.commands ~= nil then
+            for k, v in pairs(f.commands) do
+                print("Linked Command: ",k)
+                CustomCommands[k] = v
+                icmd = icmd + 1
+            end
+        end
+        print("Scenes registered: ", iscenes)
+        print("AI scripts registered: ", iai)
+        print("Spawners registered: ", ispawners)
+        print("Events registered: ", ievents)
+        print("Commands registered: ", icmd)
     end
     
     local sc = love.filesystem.getDirectoryItems( "scripts" )
@@ -1138,13 +1378,11 @@ function love.load()
 end
 
 function OpenConsole()
-    --ConsoleInput = ""
     ConsoleOpen = true
     Paused = true
 end
 
 function CloseConsole()
-    --ConsoleInput = ""
     ConsoleOpen = false
     Paused = false
 end
@@ -1211,7 +1449,17 @@ function love.keypressed( key, scancode, isrepeat )
 end
 
 function love.update(dt)
-    if not Paused then
+    TotalDelta = TotalDelta + dt
+    local s = math.floor(TotalDelta)
+    
+    if s ~= TotalSeconds then
+        TotalSeconds = s
+        if Scene.get().second ~= nil then
+            Scene.get().second()
+        end
+        
+    end
+    if not Paused and Scene.get().update ~= nil then
         Scene.get().update(dt)
     end
 end
@@ -1235,6 +1483,15 @@ function HandleConsole()
 end
 
 function ExecCommand(cmdln)
+    cmdln = string.strip(cmdln)
+    if string.contains(cmdln, "|") then
+        for _, newln in ipairs(string.split(cmdln, "|")) do
+            print("Branching command: ", newln)
+            ExecCommand(newln)
+            
+        end
+        return
+    end
     local cmd = ""
     local val = ""
     
@@ -1247,13 +1504,14 @@ function ExecCommand(cmdln)
     
 
     if cmd == "run" then
+        print("Running ", val)
         local success, result = pcall(function()
             local chunk = load(val)
             if chunk ~= nil then
                 chunk()
             end
         end)
-        print(success, result)
+        print("result: ", success, result)
         if result ~= nil then
             if success then
             -- Code executed successfully
@@ -1274,7 +1532,18 @@ function ExecCommand(cmdln)
         Scene.set("ship_main")
     elseif cmd == "quit" then
         love.event.quit()
+    elseif cmd == "get" then
+        local str = "return "..val
+        print("EXEC: ",str)
+        local func = load(str)
+        return func()
     else
+        local handled = false
+        for k, v in pairs(CustomCommands) do
+            if cmd == k then 
+                v(val)
+            end
+        end
         ExecCommand("run "..cmdln)
     end
 end
@@ -1283,6 +1552,9 @@ function love.textinput(t)
     if ConsoleOpen and t ~= "`" then
         ConsoleInput = ConsoleInput .. t
     end
+    if Scene.get().textinput ~= nil then
+        Scene.get().textinput(t)
+    end
 end
 ConsoleLogStart = 1
 
@@ -1290,7 +1562,9 @@ function love.draw()
     ---print(G.getColor())
     --love.graphics.clear()
     --if not ConsoleOpen then
-    Scene.get().draw()
+    if Scene.get().draw ~= nil then
+        Scene.get().draw()
+    end
     --end
     
     if ShowMusic and GlobalSave.system.music then

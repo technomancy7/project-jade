@@ -1,6 +1,6 @@
 function love.conf(t)
-    t.identity = "A Spiffing Space Odyssey"
-    t.window.title = "A Spiffing Space Odyssey"   
+    t.identity = "Abyssal Odyssey"
+    t.window.title = "Abyssal Odyssey"   
     t.modules.joystick = false
     t.modules.physics = false
 end

@@ -150,6 +150,10 @@ function string.split(s, delimiter)
     return result;
 end
 
+function string.strip(str)
+    return str:gsub("^%s*(.-)%s*$", "%1")
+end
+
 function string.getind(s, ind) return s:sub(ind,ind) end
 
 function string.repind(s, ind, news)
@@ -191,7 +195,7 @@ function string.Left( str, num ) return string.sub( str, 1, num ) end
 function string.Right( str, num ) return string.sub( str, -num ) end
 
 function string.Replace( str, tofind, toreplace )
-	local tbl = string.SplitStr( tofind, str )
+	local tbl = string.split( tofind, str )
 	if ( tbl[ 1 ] ) then return table.concat( tbl, toreplace ) end
 	return str
 end
@@ -210,9 +214,7 @@ function string.SetChar( s, k, v )
 end
 
 function string.GetChar( s, k )
-
 	return s:sub( k, k )
-
 end
 
 function math.Rand( low, high )
