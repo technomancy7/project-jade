@@ -3,6 +3,7 @@
         "trailing-space",
         "unused-local",
         "undefined-field",
-        "deprecated"
+        "deprecated",
+        "param-type-mismatch"
     ]
 }

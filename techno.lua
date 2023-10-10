@@ -254,6 +254,13 @@ function DeepCopy(orig)
     return copy
 end
 
+function MergeObj(first, second)
+  for k, v in pairs(second) do
+    first[k] = v
+  end
+  return first
+end
+
 function Implement(orig)
     return DeepCopy(orig)
 end

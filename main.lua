@@ -11,10 +11,41 @@ JSON = require "json"
 
 -- TODO
 --[[
+menu system (
+make command menu font inherit from the menu object, which inherits from global, but can be overwritten
+hook for when menu opens and closes, so you can define saving/loading variables etc
+add options for command menu
+text input, same as for events, saves to a variable in the menu object when typed
+number, format as Text < 0 >, left and right change the number, saved to a variable each change
+Add a popout value, which displays the text in a new box below or above the menu (the menu itself should have a popout location value, "above" or "below")
+
+Continue (Only active if there is save files, and resumes last used file, uses Global save file index)
+New Story (Starts new, default save)
+Load (Shows list of all save files)
+Options [
+    Music on/off
+    Music volume (Need to implement in the music player)
+    Menu colour settings
+]
+Quit
+
+Add support for menu titles which shows above the menu
+In the menu, try making all values show not just selected ones
+Replace the string load value system with a lambda function return
+See if some of the load logic in events can be changed to lambdas
+Menu hooks for exit
+
+Show story info on main menu screen
+
+
+Maybe group up ai scripts and spawners by game mode so rpg and space can have their own space
+
+make the story loading flexible
+
 remake the floating text as entities instead of their own system
 add the expanding/contracting rings idea also as an entity
 
-move more story-specific functions to the story file (abyssal.lua)
+move more story-specific functions to the story file (abyssal.lua) or abyssal_scripts.lua in the scripts directory
 ]]--
 
 
@@ -50,7 +81,6 @@ MusicNames = {}
 Sounds = {}
 Sprites = {}
 Fonts = {}
-EntityList = {}
 
 -- Template save file to use for creating new ones
 DefaultSave = {
@@ -75,15 +105,12 @@ DefaultSave = {
 -- Current safe file data
 CurrentSave = DefaultSave
 
-function PlayerData()
-    return CurrentSave.player
-end
-
 -- Universal settings stored outside of individual save file scope
 GlobalSave = {
     system = {
         savefile = 0,
-        music = true
+        music = true,
+        music_volume = 1.0
     },
     keys = {
         move_up = { "w" },
@@ -91,7 +118,7 @@ GlobalSave = {
         move_right = { "d" },
         move_left = { "a"},
         confirm = { "return", "space" },
-        cancel = { "c" },
+        cancel = { "c", "backspace", "escape" },
         fire_up = { "up" },
         fire_down = { "down" },
         fire_right = { "right" },
@@ -99,11 +126,6 @@ GlobalSave = {
         command_menu = { "z", "1" },
     }
 }
-
--- Get the current Player entity
-function Player()
-    for _, ent in ipairs(EntityList) do if ent.player then return ent end end
-end
 
 -- Container for custom command line actions, also used for Events triggers
 CustomCommands = {}
@@ -211,29 +233,66 @@ Scenes = {
             Slots = {}
         },
         keypress = function( key, scancode, isrepeat ) 
-            if table.has_value(GlobalSave.keys.confirm, key) then
-                    GlobalSave.system.savefile = SV().SelectedSlot
+            if not IsMenuOpen() then
+                Scenes.menu_main.opening()
+            end
+        end,
+        opening = function() 
+            CreateMenu({title = "Main", on_close = function() print("Main menu closed.") end})
+            AddMenuCommand({text = "Continue", enabled = GlobalSave.system.savefile ~= 0 and SaveExists(GlobalSave.system.savefile)})
+            
+            AddMenuCommand({text = "New Story", hover_text = "Starts a brand new story.",
+            
+            callback = function()
                     if LoadSave() then
                         if not CurrentSave.flags.done_tutorial then
                             ActivateEvent(STORY.start_scene)
-                            
                         else
                             Scene.set("ship_main")
                         end
                         Sfx("confirm")
+                        CloseAllMenu()
                         return
                     else
                         SaveFile(GetSaveFile(), DefaultSave)
                         SV().Slots[tostring(SV().SelectedSlot)] = DefaultSave
                         Sfx("confirm")
+                        CloseAllMenu()
                         LoadSave()
+                        if not CurrentSave.flags.done_tutorial then
+                            ActivateEvent(STORY.start_scene)
+                        else
+                            Scene.set("ship_main")
+                        end
                         return
                     end
-                    return
-            end
-        end,
-        opening = function() 
+            end})
+            AddMenuCommand({text = "Load Save"})
+            AddMenuCommand({text = "Save Slot", hover_text = "Changes which save slot to use by default.",
+            
+            value=function() return GlobalSave.system.savefile end,
+            
+            scroll_left = function() GlobalSave.system.savefile = GlobalSave.system.savefile - 1 end,
+    
+            scroll_right = function() GlobalSave.system.savefile = GlobalSave.system.savefile + 1 end})
+            
+            AddMenuCommand({text = "Settings", callback = function()
+                CreateMenu({title = "Settings", on_close = function() print("Settings menu closed.") end})
+                AddMenuCommand({text = "Music"})
+                AddMenuCommand({text = "Music Volume"})
+                --AddMenuCommand({text = "Music"})
+                AddMenuCommand({text = "Back", callback = RemoveMenu})
+            end})
+            
+            AddMenuCommand({text = "Credits", callback = function()
+                CreateMenu()
+                AddMenuCommand({text = "It's me!"})
+                AddMenuCommand({text = "Back", callback = RemoveMenu})
+            end})
+            AddMenuCommand({text = "Quit", callback = love.event.quit})
+            
             PlayMusic("sky")
+            --[[
             if FS.getInfo(GetSaveFile(0)) ~= nil then
                 print("File 0 exists")
                 SV().Slots["0"] = LoadFile(GetSaveFile(0))
@@ -252,10 +311,11 @@ Scenes = {
                 print("File 3 exists")
                 SV().Slots["3"] = LoadFile(GetSaveFile(3))
             end
+            ]]--
         end,
         update = function(dt)
             --Scene.set("ship_main")
-            if KB.isDown("up") and SV().SelectedSlot > 1 then
+            --[[if KB.isDown("up") and SV().SelectedSlot > 1 then
                 SV().SelectedSlot = SV().SelectedSlot - 2
                 Sfx("button")
             end
@@ -272,56 +332,16 @@ Scenes = {
                 Sfx("button")
             end
             -- fire key; saves selectedslot to globalsave system then call LoadSave
+            ]]--
         end,
         draw = function()
-            if BackgroundRGBA.R > 0 then BackgroundRGBA.R = BackgroundRGBA.R - 1 end
+            --[[if BackgroundRGBA.R > 0 then BackgroundRGBA.R = BackgroundRGBA.R - 1 end
             if BackgroundRGBA.G > 0 then BackgroundRGBA.G = BackgroundRGBA.G - 1 end
-            if BackgroundRGBA.B > 0 then BackgroundRGBA.B = BackgroundRGBA.B - 1 end
-            SetBG()
+            if BackgroundRGBA.B > 0 then BackgroundRGBA.B = BackgroundRGBA.B - 1 end]]
+            FadeBGTo(100, 0, 0)
             
-            G.print(GetKey("confirm").." to select save file", 0, 0)
-            G.print("Music: "..tostring(GlobalSave.system.music).." (F11)", 400, 0)
-            local x_off = 0
-            local y_off = 40
-            
-            if SV().SelectedSlot == 0 then
-                local s = SV().Slots["0"]
-                G.rectangle("fill", 140,30, 260,260)
-                if s == nil then G.print({Red, "No data"}, 140 + x_off,30 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 140 + x_off,30 + y_off) end
-            else
-            local s = SV().Slots["0"]
-                G.rectangle("line", 140,30, 260,260)
-                if SV().Slots["0"] == nil then G.print({Red, "No data"}, 140 + x_off,30 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 140 + x_off,30 + y_off) end
-            end
-            
-            if SV().SelectedSlot == 1 then
-                local s = SV().Slots["1"]
-                G.rectangle("fill", 420,30, 260,260)
-                if s == nil then G.print({Red, "No data"}, 420 + x_off,30 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 420 + x_off,30 + y_off) end
-            else
-                G.rectangle("line", 420,30, 260,260)
-                local s = SV().Slots["1"]
-                if s == nil then G.print({Red, "No data"}, 420 + x_off,30 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 420 + x_off,30 + y_off) end
-            end
-            
-            if SV().SelectedSlot == 2 then
-                local s = SV().Slots["2"]
-                G.rectangle("fill", 140,310, 260,260)
-                if SV().Slots["2"] == nil then G.print({Red, "No data"}, 140 + x_off,310 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 140 + x_off,310 + y_off) end
-            else
-                local s = SV().Slots["2"]
-                G.rectangle("line", 140,310, 260,260)
-                if s == nil then G.print({Red, "No data"}, 140 + x_off,310 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 140 + x_off,310 + y_off) end
-            end
-            
-            if SV().SelectedSlot == 3 then
-                local s = SV().Slots["3"]
-                G.rectangle("fill", 420,310, 260,260)
-                if s == nil then G.print({Red, "No data"}, 420 + x_off,310 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 420 + x_off,310 + y_off) end
-            else
-                local s = SV().Slots["3"]
-                G.rectangle("line", 420,310, 260,260)
-                if s == nil then G.print({Red, "No data"}, 420 + x_off,310 + y_off) else G.print({Green, s.player.name.."\nFuel: "..s.player.fuel.."\nSupplies: "..s.player.supplies.."\nLevel: "..s.player.level.." ("..s.player.exp..")"}, 420 + x_off,310 + y_off) end
+            if not IsMenuOpen() then
+                G.print("Press any button to start.", 100, 100)
             end
         end,
         closing = function() end
@@ -586,21 +606,26 @@ Scenes = {
             G.rectangle("line", text_x-10, text_y-10, Fonts.main:getWidth(text)+20, rectHeight)
             G.print(SV().tt_text, text_x, text_y)
             
-            text_x = 20
-            text_y = 250
+
             
             if SV().EvtData.get_input ~= nil then
-                G.print("Input text: ", text_x, text_y-25)
+                text_y = text_y + rectHeight
+                --G.print("Input text: ", text_x, text_y-25)
                 G.setColor({0.6,0.2,0.2, 1})
-                G.rectangle("fill", text_x-10, text_y-10, G.getWidth()-20, Fonts.main:getHeight() + 20)
+                G.rectangle("fill", text_x-10, text_y-10, Fonts.main:getWidth(text)+20, Fonts.main:getHeight() + 20)
                 G.setColor({0.8, 0.8, 0.8, 1})
-                G.rectangle("line", text_x-10, text_y-10, G.getWidth()-20, Fonts.main:getHeight() + 20)
+                G.rectangle("line", text_x-10, text_y-10, Fonts.main:getWidth(text)+20, Fonts.main:getHeight() + 20)
+                --G.getWidth()-20
                 G.print(SV().input_text.."_", text_x, text_y)
                 G.setColor({1, 1, 1, 1})
-                G.print("(Enter)", G.getWidth()-100, text_y+25)
+                G.print("(Enter)", text_x, text_y+25)
             end
             
+
+            
             if SV().EvtData.choices ~= nil then
+                text_x = 20
+                text_y = 250
                 for i, opt in ipairs(SV().EvtData.choices) do
                     local mstr = tostring(i).." "..SV().tt_opts[i]
                     
@@ -621,6 +646,300 @@ Scenes = {
         closing = function() end
     }
 }
+
+MenuStack = {}
+
+MenuSystems = {
+    command = {
+        draw = function(current) 
+            local x = current.x
+            local y = current.y
+            local w = current.width
+            local h = current.height
+            local font = Fonts.menu
+            local bt = current.border_thickness
+
+            local auto_w = (w == -1)
+            local auto_h = (h == -1)
+            local cent_x = (x == -1)
+            local cent_y = (y == -1)
+
+            for i, cmd in ipairs(current.commands) do
+                if auto_w then
+                    if font:getWidth("> "..cmd.text) > w then
+                        w = font:getWidth("> "..cmd.text)
+                    end
+                end
+                
+                if auto_h then
+                    h = h + font:getHeight()
+                end
+            end
+
+            if cent_x then
+                x = (G.getWidth() - w) / 2
+            end
+
+            if cent_y then
+                y = (G.getHeight() - h) / 2
+            end
+
+            local text_x = x
+            local text_y = y
+
+            if DebugMode then
+                G.print("H "..tostring(h).." // W "..tostring(w), text_x-25, text_y-50)
+                G.print("FH "..tostring(font:getHeight()), text_x-25, text_y-25)
+            end
+
+
+            G.setColor(current.bg)
+            G.rectangle("fill", x-5, y, w+10, h)
+            G.setColor(current.border)
+            G.setLineWidth(bt)
+            G.rectangle("line", x-5, y, w+10, h)
+            G.setLineWidth(1)
+            G.setColor({1, 1, 1, 1})
+
+            if current.title ~= "" then
+                local tf = Fonts.main
+                G.setColor(current.bg)
+                G.rectangle("fill", x-5, y-tf:getHeight(), tf:getWidth(current.title)+10, tf:getHeight())
+                G.setColor(current.border)
+                G.setLineWidth(bt)
+                G.rectangle("line", x-5, y-tf:getHeight(), tf:getWidth(current.title)+10, tf:getHeight())
+                G.setLineWidth(1)
+                G.setColor({1, 1, 1, 1})
+                G.print(current.title, x, y-tf:getHeight())
+            end
+
+            for i, cmd in ipairs(current.commands) do        
+                local prefix = ""
+                
+                if cmd.value ~= nil then
+                    local base_x = text_x+5+w
+                    local base_y = text_y
+                    local txt = "< "..tostring(cmd.value()).." >"
+                    
+                    G.setColor(current.bg)
+                    G.rectangle("fill", base_x, base_y, font:getWidth(txt), font:getHeight())
+                    G.setColor(current.border)
+                    G.setLineWidth(bt)
+                    G.rectangle("line", base_x, base_y, font:getWidth(txt), font:getHeight())
+                    G.setLineWidth(1)
+                    G.setColor({1, 1, 1, 1})
+                    
+                    G.setFont(font)
+                    G.print(txt, base_x, base_y)
+                    G.setFont(Fonts.main)
+                        
+                end
+                
+                if i == current.cursor and cmd.hover_text ~= "" then
+                    local pf = font
+                    local px = 0
+                    local py = 0
+                    
+                    if current.hover_popout_location == "screen_top" then
+                        px = (G.getWidth() - pf:getWidth(cmd.hover_text)) / 2 
+                        py = 0
+                    elseif current.hover_popout_location == "screen_bottom" then
+                        px = (G.getWidth() - pf:getWidth(cmd.hover_text)) / 2 
+                        py = (G.getHeight() - (pf:getHeight() * 2))
+                    end
+
+                    G.setFont(font)
+                    G.setColor(current.bg)
+                    G.rectangle("fill", px, py+pf:getHeight(), pf:getWidth(cmd.hover_text)+10, pf:getHeight())
+                    G.setColor(current.border)
+                    G.setLineWidth(bt)
+                    G.rectangle("line", px, py+pf:getHeight(), pf:getWidth(cmd.hover_text)+10, pf:getHeight())
+                    G.setLineWidth(1)
+                    G.setColor({1, 1, 1, 1})
+                    G.print(cmd.hover_text, px, py+pf:getHeight())
+                    --print(py,cmd.hover_text)
+                    G.setFont(Fonts.main)
+                end
+                
+                if i == current.cursor and cmd.enabled == false then
+                    G.setColor(current.disabled_colour)
+                    prefix = "X "
+                elseif cmd.enabled == false then
+                    G.setColor(current.disabled_colour)
+                elseif i == current.cursor then 
+                    G.setColor(current.select_colour) 
+                    prefix = "> "
+                else
+                    G.setColor(current.text_colour) 
+                end
+                    
+                G.setFont(font)
+                G.print(prefix..cmd.text, text_x, text_y)
+                G.setFont(Fonts.main)
+                if DebugMode then G.print(tostring(text_y), text_x-40, text_y) end
+                
+                G.setColor({1, 1, 1, 1})
+                text_y = text_y + font:getHeight()
+            end
+        end, 
+        key = function(key)
+            if table.contains(GlobalSave.keys.fire_left, key) or table.contains(GlobalSave.keys.move_left, key) then
+                local cmd = GetSelectedMenuCommand()
+                if cmd.scroll_left ~= nil then
+                    cmd.scroll_left()
+                end
+                return
+            end
+
+            if table.contains(GlobalSave.keys.fire_right, key) or table.contains(GlobalSave.keys.move_right, key) then
+                local cmd = GetSelectedMenuCommand()
+                if cmd.scroll_right ~= nil then
+                    cmd.scroll_right()
+                end
+                return
+            end
+
+            if table.contains(GlobalSave.keys.fire_up, key) or table.contains(GlobalSave.keys.move_up, key) then
+                local m = GetCurrentMenu()
+                
+                if m.cursor > 1 then 
+                    m.cursor = m.cursor - 1 
+                else
+                    m.cursor = #m.commands
+                end
+                
+                return
+            end
+
+            if table.contains(GlobalSave.keys.fire_down, key) or table.contains(GlobalSave.keys.move_down, key) then
+                local m = GetCurrentMenu()
+                
+                if m.cursor < #m.commands then 
+                    m.cursor = m.cursor + 1 
+                else
+                    m.cursor = 1
+                end
+                
+                return
+            end
+
+            if table.contains(GlobalSave.keys.confirm, key) then
+                local m = GetCurrentMenu()
+                
+                if m.commands[m.cursor].callback ~= nil and m.commands[m.cursor].enabled then
+                    Sfx(m.commands[m.cursor].sfx)
+                    m.commands[m.cursor].callback() 
+                end
+            end
+
+            if table.contains(GlobalSave.keys.cancel, key) then
+                local m = GetCurrentMenu()
+                print(#MenuStack, m.back_can_close_last)
+                if #MenuStack == 1 and m.back_can_close_last then
+                    RemoveMenu()
+                elseif #MenuStack > 1 then
+                    RemoveMenu()
+                end
+            end
+        end
+    }
+}
+
+function IsMenuOpen()
+    return (#MenuStack > 0)
+end
+
+function GetCurrentMenu()
+    return MenuStack[#MenuStack]
+end
+
+function CreateMenu(opts)
+    if opts == nil then opts = {} end
+    
+    local newmenu = {
+        x = -1,
+        y = -1,
+        width = -1,
+        height = -1,
+        bg = {0.2, 0.2, 0.6, 1},
+        border = {1, 1, 1, 1},
+        border_thickness = 2,
+        commands = {},
+        text_colour = {1, 1, 1, 1},
+        select_colour = {0.5, 1, 1, 1},
+        disabled_colour = {0.2, 0.2, 0.2, 0.2},
+        cursor = 1,
+        menu_type = "command",
+        back_can_close_last = true,
+        title = "",
+        hover_popout_location = "screen_top",
+        on_close = nil
+    }
+    
+    MergeObj(newmenu, opts)
+    table.insert(MenuStack, newmenu)
+end
+
+function RemoveMenu()
+    if MenuStack[#MenuStack].on_close ~= nil then
+        MenuStack[#MenuStack].on_close()
+    end
+    table.remove(MenuStack)
+end
+
+function CloseAllMenu()
+    while #MenuStack ~= 0 do
+        RemoveMenu()
+    end
+end
+
+function AddMenuCommand(opts)
+    if opts == nil then opts = {} end
+    local current = MenuStack[#MenuStack]
+    local newcmd = {
+        text = "Default Command",
+        callback = nil,
+        enabled = true,
+        sfx = "confirm",
+        value_type = nil,
+        value = nil,
+        hover_text = ""
+    }
+    MergeObj(newcmd, opts)
+    table.insert(current.commands, newcmd)
+end
+
+function GetSelectedMenuCommand()
+    local m = MenuStack[#MenuStack]
+    return m.commands[m.cursor]
+end
+
+function RemoveMenuCommand(idx)
+    local current = MenuStack[#MenuStack]
+    table.remove(current.commands, idx)
+end
+
+function RenderMenu()
+    if #MenuStack == 0 then return end
+    
+    local current = MenuStack[#MenuStack]
+    if MenuSystems[current.menu_type] ~= nil then
+        MenuSystems[current.menu_type].draw(current)
+        return true
+    end
+end
+
+function HandleMenuInput(ik)
+    if IsMenuOpen() then
+        local current = MenuStack[#MenuStack]
+        if MenuSystems[current.menu_type] ~= nil then
+            MenuSystems[current.menu_type].key(ik)
+            return true
+        end
+    end
+
+end
+
 
 function FadeBGTo(r, g, b, scale)
     if scale == nil then scale = 1 end
@@ -675,433 +994,9 @@ function DispatchEvent()
     end    
 end
 
-BackgroundRGBA = {
-    R = 0,
-    G = 0,
-    B = 0,
-    A = 0
-}
+BackgroundRGBA = { R = 0, G = 0, B = 0,  A = 0 }
 
 FloatingTexts = {}
-
--- BEGIN ENTITY
-Entity = class('Entity')
-LastID = 0
-
-function Entity:initialize(x, y)
-    -- Generic variables container, useful to not clutter up the main namespace
-    self.v = {}
-    
-    self.player = false
-    
-    -- Defining location on the screen
-    self.x = x or 0
-    self.y = y or 0
-
-    -- How fast the sprite moves
-    self.move_speed = 5
-
-    -- Direction this entity is facing, usually used for "move forward" calls
-    self.direction = "up"
-    
-    -- How rapidly the velocity decays after initial movement
-    self.velocity_decay = 1
-
-    -- Current movement value
-    self.velocity_x = 0
-    self.velocity_y = 0
-
-    -- Sprite info
-    self.sprite = nil
-    self.size = 1
-    self.rotation = 0
-    self.hidden = false
-    
-    -- Either index of entity, or special value, such as "player"
-    self.id = nil
-    
-    -- Generic switch for wether this is a projectile, for quick exclusion from routines that should only effect living entities
-    self.projectile = false
-    
-    -- The spawner function to trigger when "fire" is called
-    self.projectile_spawner = Spawner.projectile1
-    
-    -- Generic switch for wether this is a pickup, some item on the field
-    self.pickup = false
-    
-    -- Generic switch for inanimate objects in the field
-    self.decoration = false
-    
-    -- Check for if attacks should land/aggro with eachother
-    self.alliance = 0
-
-    -- AI script function, ran each tick
-    self.ai = nil
-    
-    -- Current health, destroyed when reaches 0
-    self.health = 100
-
-    -- Is this entity owned by another entity, such as in the case of a projectile, to register who the shooter was
-    self.owner = nil
-
-    -- Can only fire when this value is 0, decays by 1 each tick
-    self.attack_cooldown = 0
-    
-    self.execute_cooldown = 0
-
-    -- How much damage does this entity do when it hits another
-    self.hit_damage = 20
-    
-    -- The value the cooldown is set to after each attack
-    self.attack_delay = 10
-    
-    -- Table of sound effect instances for this object
-    self.sounds = {}
-    
-    -- Events
-    self.on_enter_world = nil
-    self.on_leave_world = nil
-    self.on_hit = nil
-end
-
-function Entity:draw()
-    if self.sprite == nil then return end
-    if self.hidden == true then return end
-    
-    G.draw(self.sprite, self.x, self.y, self.rotation, self.size, self.size, self.sprite:getWidth() / 2, self.sprite:getHeight() / 2)
-    
-    if DebugMode then
-        G.print("\nID: "..tostring(self.id).."\nALLIANCE: "..tostring(self.alliance).."\nOWNER: "..tostring(self.owner).."\nLOC: "..tostring(self.x).."."..tostring(self.y).."\nSPRITE: "..self.sprite:getWidth().."x"..self.sprite:getHeight(), self.x, self.y+20)
-        
-        local ox = self.sprite:getWidth()/2 
-        local oy = self.sprite:getHeight()/2 
-        G.rectangle("line", self.x - ox, self.y - oy, ox * 2, oy * 2)
-    end
-    
-end
-
-function Entity:fire(dir)
-    if dir == nil then dir = self.direction end
-    
-    if self.attack_cooldown > 0 then return end
-
-    self.projectile_spawner(self.x, self.y, self, dir)
-
-    -- Delay the players next shot
-    self.attack_cooldown = self.attack_delay
-end
-
-function Entity:sfx(name)
-    --print("sfx", self.id, name)
-    local src = self.sounds[name]
-    
-    if src == nil then return end
-    
-    if src:isPlaying() then
-        src:stop()
-    end
-    
-    src:play()
-end
--------------------------------------
--- Clean up the entity if it goes out of bounds.
--------------------------------------
-function Entity:cleanup_out_of_bounds()
-    local outbounds = false
-    if self.y < 0 then outbounds = true end
-    if self.y > (G.getHeight()) then outbounds = true end -- - self.sprite:getHeight()
-    if self.x < 0 then outbounds = true end
-    if self.x > (G.getWidth()) then outbounds = true end --  - self.sprite:getWidth()
-    
-    if outbounds then
-        if not self.player then
-            self:remove_from_world() 
-        end
-    end
-end
-
--------------------------------------
--- Callback that is run every tick.
--------------------------------------
-function Entity:tick()
-    local m = 1 * GameSpeed
-    if self.attack_cooldown > 0 then self.attack_cooldown = self.attack_cooldown - m end
-    if self.execute_cooldown > 0 then self.execute_cooldown = self.execute_cooldown - m end
-    if self.attack_cooldown < 0 then self.attack_cooldown = 0 end
-    if self.execute_cooldown < 0 then self.execute_cooldown = 0 end
-    self:cleanup_out_of_bounds()
-end
-
--------------------------------------
--- Move the entity in the specified direction.
--- @param s Distance to move.
--------------------------------------
-function Entity:move_forward(s)
-    --print("dir", self.id, self.direction)
-    self["move_"..self.direction](self, s)
-    if self.direction == "right" then self.rotation = 1.6 end
-    if self.direction == "down" then self.rotation = 3.15 end
-    if self.direction == "left" then self.rotation = 4.7 end
-    if self.direction == "up" then self.rotation = 0 end
-end
-
-function Entity:move_up(s)
-    s = s * GameSpeed
-    self.y = self.y - s
-end
-
-function Entity:move_down(s)
-    s = s * GameSpeed
-    self.y = self.y + s
-end
-
-function Entity:move_left(s)
-    s = s * GameSpeed
-    self.x = self.x - s
-end
-
-function Entity:move_right(s)
-    s = s * GameSpeed
-    self.x = self.x + s
-end
-
--------------------------------------
--- Checks if objects are in range and executes its action based on what it is
--- @param power Damage to hit for.
--------------------------------------
-function Entity:execute(power, single_use)
-    if self.execute_cooldown > 0 then return end
-    
-    if power == nil then power = 10 end
-    if single_use == nil then single_use = true end
-    
-    --[[if self.projectile and self.alliance == 1 then
-        local p = Play er()
-        local ox = p.sprite:getWidth()/2 
-        local oy = p.sprite:getHeight()/2 
-        if self.x < p.x + ox and self.x > p.x - ox and self.y < p.y + oy and self.y > p.y - oy then
-            AddFloatingText({ x = p.x, y = p.y, text = power, float = true })
-            p:take_damage(power)
-            if single_use == true then self:remove_from_world() end
-        end]]--
-    if self.projectile then
-        for _, ent in ipairs(EntityList) do
-            if ent.projectile then goto continue end
-            if ent.id == self.id then goto continue end
-            if self.alliance == ent.alliance then goto continue end 
-            --print(self.id, self.owner)
-            local ox = ent.sprite:getWidth()/2 
-            local oy = ent.sprite:getHeight()/2 
-
-            if self.x < ent.x + ox and self.x >= ent.x - ox and self.y < ent.y + oy and self.y >= ent.y - oy then
-                AddFloatingText({ x = ent.x, y = ent.y, text = power, float = true })
-                ent:take_damage(power, self.owner)
-                if single_use == true then self:remove_from_world() end
-            end
-            ::continue::
-        end
-    elseif self.pickup then
-        if self:get_distance_entity("player") <= 5 then
-            CurrentSave.player.exp = CurrentSave.player.exp + power
-            if single_use == true then self:remove_from_world() end
-        end
-    elseif self.decoration then
-        --if self.velocity_x ~= 0 and self.velocity_y ~= 0 then
-            for _, ent in ipairs(EntityList) do
-                if ent.id == self.id then goto continue end
-                if self.alliance == ent.alliance then goto continue end
-                local ox = ent.sprite:getWidth()/2 
-                local oy = ent.sprite:getHeight()/2 
-                if self.x < ent.x + ox and self.x >= ent.x - ox and self.y < ent.y + oy and self.y >= ent.y - oy then
-                    AddFloatingText({ x = ent.x, y = ent.y, text = power, float = true })
-                    ent:take_damage(power, self.id)
-                    AddFloatingText({ x = self.x, y = self.y, text = math.round(power/3), float = true })
-                    self:take_damage(math.round(power/3), ent.id)
-                    self.execute_cooldown = 50
-                end
-                ::continue::
-            end
-            
-        --end
-    end
-end
-
-function Entity:take_damage(dam, instigator)
-    --print("Instigated "..dam.." damage from "..instigator)
-    self:sfx("hit")
-    self.health = self.health - dam
-    if self.player then CurrentSave.player.health = self.health end
-    
-    if self.health <= 0 then 
-        --if self.player then
-            --self.health = 100 --TODO handle some death state
-        --else
-            local i = GetEntity(instigator)
-            local attribs = self.id
-            if self.projectile then attribs = self.owner end
-            if i ~= nil then i:score_kill(attribs) end
-            self:died(instigator) 
-        --end
-    end
-    
-    --local has_died = self.health <= 0
-    
-    if self.on_hit ~= nil then
-        self:on_hit(instigator)
-    end
-end
-
-function Entity:score_kill(target)
-    print(self.id.." has killed "..target)
-end
-function Entity:died(instigator)
-    self:remove_from_world()
-end
-
-function Entity:add_to_world()
-    table.insert(EntityList, self)
-    self.id = LastID
-    LastID = LastID + 1
-    --print("Added to world as " .. tostring(self.id))
-    
-    if self.on_enter_world ~= nil then
-        self:on_enter_world()
-    end
-end
-
-function Entity:remove_from_world()
-    if self.on_leave_world ~= nil then
-        self:on_leave_world()
-    end
-    
-    -- Cleanup sound effect instances
-    for _, sfx in ipairs(self.sounds) do
-        sfx:release()
-    end
-    
-    -- Remove from entity list
-    --table.remove(EntityList, self.id)
-    
-    for index, ent in ipairs(EntityList) do
-        
-        --print("Shifting " .. tostring(ent.id) .. " to " .. tostring(id))
-        --ent.id = id
-        if ent.id == self.id then
-            table.remove(EntityList, index)
-            break
-        end
-    end
-    
-    -- Release self
-    self = nil
-end
-
--- Attach an AI script to this entity
-function Entity:attach(ai)
-    self.ai = AIScripts[ai]
-end
-
-function Entity:get_distance_entity(id)
-    local target = GetEntity(id)
-    if target ~= nil then
-        return self:get_distance(target.x, target.y)
-    end
-end
-
-function Entity:get_distance(x, y)
-  return math.sqrt((self.x - x)^2 + (self.y - y)^2)
-end
-
-function Entity:move_to_entity(id)
-    local target = GetEntity(id)
-
-    if target ~= nil then
-        self:move_to(target.x, target.y)
-    end
-end
-
-function Entity:move_to(x, y)
-    self.x = x
-    self.y = y
-end
-
-function Entity:shift_to_entity(id)
-    local target = GetEntity(id)
-
-    if target ~= nil then
-        self:shift_to(target.x, target.y)
-    end
-end
-
-function Entity:shift_to(x, y)
-    if self.x < x then self.x = self.x + (self.move_speed * GameSpeed) end
-    if self.x > x then self.x = self.x - (self.move_speed * GameSpeed) end
-    if self.y < y then self.y = self.y + (self.move_speed * GameSpeed) end
-    if self.y > y then self.y = self.y - (self.move_speed * GameSpeed) end
-end
-
-function Entity:start_move(dir, amt)
-    if dir == "x" or dir == "y" then
-        self["velocity_" .. dir] = amt
-    end
-end
-
-function Entity:start_move_up(amt)
-    self:start_move("y", -amt)
-end
-
-function Entity:start_move_down(amt)
-    self:start_move("y", amt)
-end
-
-function Entity:start_move_left(amt)
-    self:start_move("x", -amt)
-end
-
-function Entity:start_move_right(amt)
-    self:start_move("x", amt)
-end
-
-function Entity:process_movement()
-    if self.velocity_x > 0 then
-        self.direction = "right"
-        self.rotation = 1.6
-        self.velocity_x = self.velocity_x - (self.velocity_decay * GameSpeed)
-        if self.x < (G.getWidth() - (self.sprite:getWidth() / 2)) then
-            self.x = self.x + (self.velocity_x * GameSpeed)
-        end
-    end
-
-    if self.velocity_y > 0 then
-        self.direction = "down"
-        self.rotation = 3.15
-        self.velocity_y = self.velocity_y - (self.velocity_decay * GameSpeed)
-        if self.y <  (G.getHeight() - (self.sprite:getHeight() / 2)) then
-            self.y = self.y + (self.velocity_y * GameSpeed)
-        end
-    end
-
-    if self.velocity_x < 0 then
-        self.direction = "left"
-        self.rotation = 4.7
-        self.velocity_x = self.velocity_x + (self.velocity_decay * GameSpeed)
-        if self.x > (self.sprite:getWidth() / 2) then
-            self.x = self.x - -(self.velocity_x * GameSpeed)
-        end
-    end
-
-    if self.velocity_y < 0 then
-        self.direction = "up"
-        self.rotation = 0
-        self.velocity_y = self.velocity_y + (self.velocity_decay * GameSpeed)
-        if self.y > (self.sprite:getHeight() / 2) then
-            self.y = self.y - -(self.velocity_y * GameSpeed)
-        end
-    end
-end
-
--- END ENTITY
-
 
 -- Functions
 function DisableMusic()
@@ -1116,12 +1011,8 @@ function EnableMusic()
     PlayMusic(StoredMusic)
 end
 
-function GetEntity(id)
-    if id == "player" then return Player() end
-
-    for _, ent in ipairs(EntityList) do
-        if tostring(ent.id) == tostring(id) then return ent end
-    end
+function PlayerData()
+    return CurrentSave.player
 end
 
 function AddFloatingText(data)
@@ -1158,6 +1049,7 @@ function PlayMusic(name)
     end
     
     CurrentMusic = src
+    src:setVolume(GlobalSave.system.music_volume)
     src:play()
 end
 
@@ -1216,6 +1108,10 @@ function GetSaveFile(i)
     return "save" .. tostring(i) .. ".json"
 end
 
+function SaveExists(i)
+    return (FS.getInfo(GetSaveFile(i)) ~= nil)
+end
+
 function DoFloatingText()
     for id, t in ipairs(FloatingTexts) do
         if t.speed == nil then t.speed = 1 end
@@ -1268,13 +1164,18 @@ function DrawHUD()
 end
 
 -- Callbacks
-
+-- TODO make it auto-load all sprites
+-- clear out sprites directory 
+-- make fonts and music follow the same rules too
+-- for music, keep a json database of the file names and the song names,
+-- so i can make the file name `space.mp3` while still keeping the full name for the Now Playing track
 function love.load()
     -- Defining state
     SaveDir = FS.getSaveDirectory()
 
     -- Loading assets
-    Fonts.main = G.newFont("FiraCodeNerdFont-Bold.ttf")
+    Fonts.main = G.newFont("RobotoMonoNerdFontMono-Bold.ttf")--("FiraCodeNerdFont-Bold.ttf")
+    Fonts.menu = G.newFont("RobotoMonoNerdFontMono-Bold.ttf", 16)
     G.setFont(Fonts.main)
 
     Music.space = A.newSource("music/Andy G. Cohen - Space.mp3", "stream")
@@ -1320,18 +1221,18 @@ function love.load()
 
     -- Loading extra scripts
     local connect_extension = function(f)
-        f.globals = _G
         print("Adding extension: ",f.name)
-        local rancscript = false
+        --local rancscript = false
         local iscenes = 0
         local iai = 0
         local ispawners = 0
         local ievents = 0
         local icmd = 0
+        local ims = 0
         
         if f.on_connect ~= nil then 
             f.on_connect() 
-            rancscript = true
+            --rancscript = true
         end
         
         if f.scenes ~= nil then
@@ -1369,18 +1270,21 @@ function love.load()
                 icmd = icmd + 1
             end
         end
-        print("Scenes registered: ", iscenes)
-        print("AI scripts registered: ", iai)
-        print("Spawners registered: ", ispawners)
-        print("Events registered: ", ievents)
-        print("Commands registered: ", icmd)
+        if f.menu_systems ~= nil then
+            for k, v in pairs(f.menu_systems) do
+                print("Linked Menu System: ",k)
+                MenuSystems[k] = v
+                ims = ims + 1
+            end
+        end
+        print("Scenes: "..iscenes.." | AI scripts: ".. iai.." | Spawners: "..ispawners.." | Events: "..ievents.." | Commands: "..icmd.." | Menus: "..ims)
     end
     
     local sc = love.filesystem.getDirectoryItems( "scripts" )
     
     for _, item in ipairs(sc) do
         if string.ends_with(item, ".lua") then 
-            print("Loading", love.filesystem.getSource().."scripts/"..item)
+            print("Loading", love.filesystem.getSource().."/scripts/"..item)
             connect_extension(dofile(love.filesystem.getSource().."/scripts/"..item))
         end
     end
@@ -1412,7 +1316,7 @@ end
 
 function love.keypressed( key, scancode, isrepeat )
     -- Global system binds
-
+    
     if key == "f11" then 
         if GlobalSave.system.music == true then DisableMusic() else EnableMusic() end
         return
@@ -1465,6 +1369,9 @@ function love.keypressed( key, scancode, isrepeat )
         ConsoleInput = ConsoleLog[ConsoleLogPointer]
         return
     end
+    
+    
+    if HandleMenuInput(key) then return end
     
     if not ConsoleOpen then
         Scene.get().keypress(key, scancode, isrepeat)
@@ -1606,6 +1513,8 @@ function love.draw()
             G.print(msg, G.getWidth() - w - 20, G.getHeight() - 15 + h)
         end
     end
+    
+    RenderMenu()
     
     if ConsoleOpen then
         local ci = "> "..ConsoleInput
