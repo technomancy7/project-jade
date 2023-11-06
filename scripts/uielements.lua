@@ -21,9 +21,10 @@ function DrawGauge(value, max, gx, gy, gw, gh, colours)
     colours = colours or {}
     
     -- Draw the gauge background
-    G.setColor(colours.bg_r or 0.5, colours.bg_g or 0.5, colours.bg_b or 0.5)
-    G.rectangle("fill", gaugeX, gaugeY, gaugeWidth, gaugeHeight)
-
+    if colours.bf_off ~= true then
+        G.setColor(colours.bg_r or 0.5, colours.bg_g or 0.5, colours.bg_b or 0.5)
+        G.rectangle("fill", gaugeX, gaugeY, gaugeWidth, gaugeHeight)
+    end
     -- Draw the gauge fill
     G.setColor(colours.fg_r or 1, colours.fg_g or 1, colours.fg_b or 1)
     G.rectangle("fill", gaugeX, gaugeY, gaugeWidth * value / max, gaugeHeight)
@@ -69,7 +70,7 @@ return {
                         
                         G.print(text, text_x, text_y)
                         
-                        DrawGauge(notif.lifespan, notif.max_lifespan, text_x-10, text_y+rectHeight, Fonts.notify:getWidth(text)+20, 1, {vg_r = 1, vg_g = 1, vg_b = 1})
+                        DrawGauge(notif.lifespan, notif.max_lifespan, text_x-10, text_y+rectHeight, Fonts.notify:getWidth(text)+20, 1, {vg_r = 1, vg_g = 1, vg_b = 1, bg_off = true})
                         
                         notif.lifespan = notif.lifespan - 1
                         if notif.lifespan <= 0 then table.remove(Notifications, i) end
