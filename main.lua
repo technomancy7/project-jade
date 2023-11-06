@@ -5,15 +5,14 @@
 
 local class = require 'middleclass'
 local techno = require 'techno'
-STORY = require 'abyssal' --TODO add way to change story
-JSON = require "json"
 
+JSON = require "json"
+require "entity"
 
 -- TODO
 --[[
 menu system (
 make command menu font inherit from the menu object, which inherits from global, but can be overwritten
-hook for when menu opens and closes, so you can define saving/loading variables etc
 add options for command menu
 text input, same as for events, saves to a variable in the menu object when typed
 number, format as Text < 0 >, left and right change the number, saved to a variable each change
@@ -46,6 +45,30 @@ remake the floating text as entities instead of their own system
 add the expanding/contracting rings idea also as an entity
 
 move more story-specific functions to the story file (abyssal.lua) or abyssal_scripts.lua in the scripts directory
+
+
+
+- Optional third entry in event choice for conditionals, if exists then only show if conditionals are true, same as main
+- Variant of execute for NPCs, but range check sets a flag that highlights it and prompts for interaction
+- create a generic function for spawning a circle and expand or contract it, with a set value that destroys it when reached, similar to the floating text, use for highlighting things like UI updates
+- refine floating text system and use same API for the rings, add callbacks that let me define functions to run when it expires
+- add system for clickable zones, debug spawns a blue rectangle around it
+
+
+
+Turn based, all actions consume energy, you can jump in with actions whenever by pressing the button related to the character, can only use actions if you have the energy for, and energy regains slowly over time
+For resources, mp alternative, maybe have some charges or some other mp equivalent which are used for some actions that dont auto regen
+
+For enemy AI, say they decide an action, then charge their energy up to use it
+
+
+
+For maps
+Geometry table loads from both the /maps directory, and also can be integrated by scripts like other containers
+Sprites will need to be stored as strings and converted to the relevant object when loaded
+
+For collision checking speedup
+Build a 3d array of coordinates pointing to the tile info when map is loaded in, and use that for collision checking, keep the original list for rendering
 ]]--
 
 
@@ -74,13 +97,32 @@ DebugMode = false
 GameSpeed = 1
 TotalDelta = 0
 TotalSeconds = 0
+ShowGrid = false
+CurrentMap = nil
 -- Containers
 
 Music = {}
 MusicNames = {}
 Sounds = {}
 Sprites = {}
+Tiles = {}
 Fonts = {}
+Geometry = {
+    map_edit_debug = {
+        {0, 0, "wall"},
+        {32, 0, "wall"},
+        {0, 32, "wall"},
+    }
+}
+
+
+Hooks = {
+    textinput = {},
+    postdraw = {},
+    predraw = {},
+    update = {},
+    keypress = {}
+}
 
 -- Template save file to use for creating new ones
 DefaultSave = {
@@ -127,6 +169,15 @@ GlobalSave = {
     }
 }
 
+TranslationTable = {
+    main = "RobotoMonoNerdFontMono-Bold",
+    menu = "RobotoMonoNerdFontMono-Bold",
+    space = "Andy G. Cohen - Space",
+    clouds = "Beat Mekanik - Making Clouds",
+    code = "Mystery Mammal - Code Composer",
+    sky = "TeknoAxe - Infinite Sky",
+}
+
 -- Container for custom command line actions, also used for Events triggers
 CustomCommands = {}
 
@@ -135,16 +186,6 @@ AIScripts = {}
 
 Spawner = {
     player = function(x, y)
-        local p = Entity:new(x, y)
-        p.sprite = Sprites.player
-        p.health = CurrentSave.player.health
-        p.sounds["hit"] = A.newSource("sounds/hit.mp3", "static")
-        p.sounds["shoot"] = A.newSource("sounds/shoot.mp3", "static")
-        p:add_to_world()
-        p.player = true
-        return p
-    end,
-    crew = function(x, y, crew_member)
         local p = Entity:new(x, y)
         p.sprite = Sprites.player
         p.health = CurrentSave.player.health
@@ -202,6 +243,57 @@ Spawner = {
 
 Events = {}
 
+function ActivateEvent(evt_id)
+    if table.has_key(Events, evt_id) then
+        Scene.set("event_container", true)
+        SV().EvtId = evt_id
+        SV().EvtData = Events[evt_id]
+        Scenes["event_container"].opening()
+    end
+end
+
+function DispatchEvent()
+    local valid_events = {}
+
+    for evt_id, event in pairs(Events) do
+        print("Checking event "..evt_id)
+        if type(event.conditions) == "string" then
+            --print("string type")
+            if event.conditions == "*" then
+                table.insert(valid_events, evt_id)
+            else
+                local success, result = pcall(function()
+                    local chunk = load("return "..event.conditions)
+                    if chunk ~= nil then
+                        if chunk() == true then table.insert(valid_events, evt_id) end
+                    end
+                end)
+            end
+        elseif type(event.conditions) == "table" then
+            --print("table type")
+            for _, cond in ipairs(event.conditions) do 
+                local success, result = pcall(function()
+                    local chunk = load("return "..cond)
+                    if chunk ~= nil then
+                        if table.contains(valid_events, evt_id) == false and chunk() == true then 
+                            table.insert(valid_events, evt_id) 
+                        end
+                    end
+                end)
+            end
+        end
+    end
+    print("Valid events: ", #valid_events)
+    if #valid_events == 0 then
+        Scene.set(STORY.main_scene)
+    elseif #valid_events == 1 then
+        ActivateEvent(valid_events[1])
+    else
+        local randomevt = valid_events[math.random(1, #valid_events)]
+        ActivateEvent(randomevt)
+    end    
+end
+
 Scene = {
     name = "menu_main",
     
@@ -216,15 +308,6 @@ Scene = {
         if Scenes[name] ~= nil and skip_opening_event ~= true then Scenes[name].opening() end
     end,
 }
-
-function ActivateEvent(evt_id)
-    if table.has_key(Events, evt_id) then
-        Scene.set("event_container", true)
-        SV().EvtId = evt_id
-        SV().EvtData = Events[evt_id]
-        Scenes["event_container"].opening()
-    end
-end
 
 Scenes = {
     menu_main = {
@@ -248,7 +331,7 @@ Scenes = {
                         if not CurrentSave.flags.done_tutorial then
                             ActivateEvent(STORY.start_scene)
                         else
-                            Scene.set("ship_main")
+                            Scene.set(STORY.main_scene)
                         end
                         Sfx("confirm")
                         CloseAllMenu()
@@ -262,7 +345,7 @@ Scenes = {
                         if not CurrentSave.flags.done_tutorial then
                             ActivateEvent(STORY.start_scene)
                         else
-                            Scene.set("ship_main")
+                            Scene.set(STORY.main_scene)
                         end
                         return
                     end
@@ -270,7 +353,7 @@ Scenes = {
             AddMenuCommand({text = "Load Save"})
             AddMenuCommand({text = "Save Slot", hover_text = "Changes which save slot to use by default.",
             
-            value=function() return GlobalSave.system.savefile end,
+            value = function() return GlobalSave.system.savefile end,
             
             scroll_left = function() GlobalSave.system.savefile = GlobalSave.system.savefile - 1 end,
     
@@ -280,7 +363,6 @@ Scenes = {
                 CreateMenu({title = "Settings", on_close = function() print("Settings menu closed.") end})
                 AddMenuCommand({text = "Music"})
                 AddMenuCommand({text = "Music Volume"})
-                --AddMenuCommand({text = "Music"})
                 AddMenuCommand({text = "Back", callback = RemoveMenu})
             end})
             
@@ -292,52 +374,11 @@ Scenes = {
             AddMenuCommand({text = "Quit", callback = love.event.quit})
             
             PlayMusic("sky")
-            --[[
-            if FS.getInfo(GetSaveFile(0)) ~= nil then
-                print("File 0 exists")
-                SV().Slots["0"] = LoadFile(GetSaveFile(0))
-            else
-                
-            end
-            if FS.getInfo(GetSaveFile(1)) ~= nil then
-                print("File 1 exists")
-                SV().Slots["1"] = LoadFile(GetSaveFile(1))
-            end
-            if FS.getInfo(GetSaveFile(2)) ~= nil then
-                print("File 2 exists")
-                SV().Slots["2"] = LoadFile(GetSaveFile(2))
-            end
-            if FS.getInfo(GetSaveFile(3)) ~= nil then
-                print("File 3 exists")
-                SV().Slots["3"] = LoadFile(GetSaveFile(3))
-            end
-            ]]--
         end,
         update = function(dt)
-            --Scene.set("ship_main")
-            --[[if KB.isDown("up") and SV().SelectedSlot > 1 then
-                SV().SelectedSlot = SV().SelectedSlot - 2
-                Sfx("button")
-            end
-            if KB.isDown("down") and SV().SelectedSlot < 2 then
-                SV().SelectedSlot = SV().SelectedSlot + 2
-                Sfx("button")
-            end
-            if KB.isDown("left") and SV().SelectedSlot % 2 ~= 0 then
-                SV().SelectedSlot = SV().SelectedSlot - 1
-                Sfx("button")
-            end
-            if KB.isDown("right") and SV().SelectedSlot % 2 == 0 then
-                SV().SelectedSlot = SV().SelectedSlot + 1
-                Sfx("button")
-            end
-            -- fire key; saves selectedslot to globalsave system then call LoadSave
-            ]]--
+
         end,
         draw = function()
-            --[[if BackgroundRGBA.R > 0 then BackgroundRGBA.R = BackgroundRGBA.R - 1 end
-            if BackgroundRGBA.G > 0 then BackgroundRGBA.G = BackgroundRGBA.G - 1 end
-            if BackgroundRGBA.B > 0 then BackgroundRGBA.B = BackgroundRGBA.B - 1 end]]
             FadeBGTo(100, 0, 0)
             
             if not IsMenuOpen() then
@@ -517,7 +558,7 @@ Scenes = {
                 end
                 return table.concat(lines, "\n")
             end
-            print("event activated", SV("event_container").EvtId) 
+            print("event activated: ", SV("event_container").EvtId) 
             SV().SelectionID = 1
             SV().tt_text = ""
             SV().tt_opts = {}
@@ -525,11 +566,16 @@ Scenes = {
             SV().cooldown = 25
             
             if SV().EvtData.get_input ~= nil and SV().EvtData.get_input.default_text ~= nil then
-                print("RUNNING get "..SV().EvtData.get_input.default_text)
+                if type(SV().EvtData.get_input.default_text) == "string" then
+                    SV().input_text = tostring(SV().EvtData.get_input.default_text)
+                elseif type(SV().EvtData.get_input.default_text) == "function" then
+                    SV().input_text = tostring(SV().EvtData.get_input.default_text())
+                end
+                --[[print("RUNNING get "..SV().EvtData.get_input.default_text)
                 local t = ExecCommand("get "..SV().EvtData.get_input.default_text)
                 if t ~= nil then
-                    SV().input_text = t
-                end
+                    SV().input_text = tostring(t)
+                end]]--
             end
             
             if SV().EvtData.choices ~= nil then
@@ -564,9 +610,11 @@ Scenes = {
             if SV().EvtData.choices ~= nil then
                 for i, opt in ipairs(SV().EvtData.choices) do
                     local cursor = #SV().tt_opts[i] + 1
-                    if SV().tt_opts[i] == opt[1] then return end
-                    local extractedChar = string.sub(opt[1], cursor, cursor)
-                    SV().tt_opts[i] = SV().tt_opts[i] .. extractedChar
+                    if SV().tt_opts[i] ~= opt[1] then 
+                        local extractedChar = string.sub(opt[1], cursor, cursor)
+                        SV().tt_opts[i] = SV().tt_opts[i] .. extractedChar
+                    end
+
                 end
             end
             
@@ -647,6 +695,10 @@ Scenes = {
     }
 }
 
+Templates = {
+    
+
+}
 MenuStack = {}
 
 MenuSystems = {
@@ -788,7 +840,7 @@ MenuSystems = {
                 if cmd.scroll_left ~= nil then
                     cmd.scroll_left()
                 end
-                return
+                return true
             end
 
             if table.contains(GlobalSave.keys.fire_right, key) or table.contains(GlobalSave.keys.move_right, key) then
@@ -796,7 +848,7 @@ MenuSystems = {
                 if cmd.scroll_right ~= nil then
                     cmd.scroll_right()
                 end
-                return
+                return true
             end
 
             if table.contains(GlobalSave.keys.fire_up, key) or table.contains(GlobalSave.keys.move_up, key) then
@@ -808,7 +860,7 @@ MenuSystems = {
                     m.cursor = #m.commands
                 end
                 
-                return
+                return true
             end
 
             if table.contains(GlobalSave.keys.fire_down, key) or table.contains(GlobalSave.keys.move_down, key) then
@@ -820,7 +872,7 @@ MenuSystems = {
                     m.cursor = 1
                 end
                 
-                return
+                return true
             end
 
             if table.contains(GlobalSave.keys.confirm, key) then
@@ -830,6 +882,7 @@ MenuSystems = {
                     Sfx(m.commands[m.cursor].sfx)
                     m.commands[m.cursor].callback() 
                 end
+                return true
             end
 
             if table.contains(GlobalSave.keys.cancel, key) then
@@ -840,6 +893,7 @@ MenuSystems = {
                 elseif #MenuStack > 1 then
                     RemoveMenu()
                 end
+                return true
             end
         end
     }
@@ -933,8 +987,7 @@ function HandleMenuInput(ik)
     if IsMenuOpen() then
         local current = MenuStack[#MenuStack]
         if MenuSystems[current.menu_type] ~= nil then
-            MenuSystems[current.menu_type].key(ik)
-            return true
+            return MenuSystems[current.menu_type].key(ik)
         end
     end
 
@@ -952,53 +1005,19 @@ function FadeBGTo(r, g, b, scale)
     SetBG()
 end
 
-function DispatchEvent()
-    local valid_events = {}
-
-    for evt_id, event in pairs(Events) do
-        print("Checking event "..evt_id)
-        if type(event.conditions) == "string" then
-            print("string type")
-            if event.conditions == "*" then
-                table.insert(valid_events, evt_id)
-            else
-                local success, result = pcall(function()
-                    local chunk = load("return "..event.conditions)
-                    if chunk ~= nil then
-                        if chunk() == true then table.insert(valid_events, evt_id) end
-                    end
-                end)
-            end
-        elseif type(event.conditions) == "table" then
-            print("table type")
-            for _, cond in ipairs(event.conditions) do 
-                local success, result = pcall(function()
-                    local chunk = load("return "..cond)
-                    if chunk ~= nil then
-                        if table.contains(valid_events, evt_id) == false and chunk() == true then 
-                            table.insert(valid_events, evt_id) 
-                        end
-                    end
-                end)
-            end
-        end
-    end
-    print("Valid events: ", #valid_events)
-    if #valid_events == 0 then
-        Scene.set("ship_main")
-    elseif #valid_events == 1 then
-        ActivateEvent(valid_events[1])
-    else
-        local randomevt = valid_events[math.random(1, #valid_events)]
-        ActivateEvent(randomevt)
-    end    
-end
-
 BackgroundRGBA = { R = 0, G = 0, B = 0,  A = 0 }
 
-FloatingTexts = {}
 
 -- Functions
+
+function RenderMap(target)
+    if Geometry[target] == nil then print("Can't render map: "..target) return end
+    for _, tile in ipairs(Geometry[target]) do
+        --print(tile[1], tile[2], tile[3])
+        G.draw(Tiles[tile[3]], tile[1], tile[2])
+    end
+end
+
 function DisableMusic()
     PlayMusic(nil)
     GlobalSave.system.music = false
@@ -1013,13 +1032,6 @@ end
 
 function PlayerData()
     return CurrentSave.player
-end
-
-function AddFloatingText(data)
-    if data.lifespan == nil then data.lifespan = 100 end
-    table.insert(FloatingTexts,
-        { x = data.x, y = data.y, text = tostring(data.text), lifespan = data.lifespan, i = 0, speed = data.speed,
-            direction = 0, float = data.float })
 end
 
 function SV(name)
@@ -1112,31 +1124,6 @@ function SaveExists(i)
     return (FS.getInfo(GetSaveFile(i)) ~= nil)
 end
 
-function DoFloatingText()
-    for id, t in ipairs(FloatingTexts) do
-        if t.speed == nil then t.speed = 1 end
-        if t.lifespan == nil then t.lifespan = 100 end
-
-        if t.float then
-            if t.direction == 0 then
-                t.x = t.x + 0.5
-            else
-                t.x = t.x - 0.5
-            end
-
-            if t.i % 25 == 0 then
-                if t.direction == 0 then t.direction = 1 else t.direction = 0 end
-            end
-        end
-        t.y = t.y - t.speed
-        t.i = t.i + 1
-
-        G.print(t.text, t.x, t.y)
-
-        if t.i >= t.lifespan then table.remove(FloatingTexts, id) end
-    end
-end
-
 function GetKey(action)
     if GlobalSave.keys[action] == nil then return "undefined" end
     return " [ "..table.concat(GlobalSave.keys[action], " | ").." ] "
@@ -1163,19 +1150,101 @@ function DrawHUD()
     end
 end
 
+function LoadEScript(extpath)
+    local ext = dofile(love.filesystem.getSource().."/scripts/"..extpath..".lua")
+    ConnectExtension(ext)
+end
+
+function ConnectExtension(f)
+    print("Adding extension: ",f.name)
+    --local rancscript = false
+    local iscenes = 0
+    local iai = 0
+    local ispawners = 0
+    local ievents = 0
+    local icmd = 0
+    local ims = 0
+    
+    if f.on_connect ~= nil then 
+        f.on_connect() 
+        --rancscript = true
+    end
+    
+    if f.scenes ~= nil then
+        for k, v in pairs(f.scenes) do
+            print("Linked scene:      ",k)
+            Scenes[k] = v
+            iscenes = iscenes + 1
+        end
+    end
+    if f.ai_scripts ~= nil then
+        for k, v in pairs(f.ai_scripts) do
+            print("Linked AI script: ", k)
+            AIScripts[k] = v
+            iai = iai + 1
+        end
+    end
+    if f.spawners ~= nil then
+        for k, v in pairs(f.spawners) do
+            print("Linked Spawner: ",k)
+            Spawner[k] = v
+            ispawners = ispawners + 1
+        end
+    end
+    if f.events ~= nil then
+        for k, v in pairs(f.events) do
+            print("Linked Event:      ", k.." // "..v.title)
+            Events[k] = v
+            ievents = ievents + 1
+        end
+    end
+    if f.commands ~= nil then
+        for k, v in pairs(f.commands) do
+            print("Linked Command: ",k)
+            CustomCommands[k] = v
+            icmd = icmd + 1
+        end
+    end
+    
+    if f.menu_systems ~= nil then
+        for k, v in pairs(f.menu_systems) do
+            print("Linked Menu System: ",k)
+            MenuSystems[k] = v
+            ims = ims + 1
+        end
+    end
+    
+    if f.hooks ~= nil then
+        for k, v in pairs(f.hooks) do
+            print("Linking "..k.." Hook...")
+            for hk, hv in pairs(v) do
+                print("Linked "..k.." Hook: ",hk)
+                Hooks[k][hk] = hv
+            end
+        end
+    end
+
+    --print("Scenes: "..iscenes.." | AI scripts: ".. iai.." | Spawners: "..ispawners.." | Events: "..ievents.." | Commands: "..icmd.." | Menus: "..ims)
+end
+    
+
 -- Callbacks
 -- TODO make it auto-load all sprites
 -- clear out sprites directory 
 -- make fonts and music follow the same rules too
 -- for music, keep a json database of the file names and the song names,
 -- so i can make the file name `space.mp3` while still keeping the full name for the Now Playing track
+-- replace references to MusicNames with TranslationTable
 function love.load()
     -- Defining state
     SaveDir = FS.getSaveDirectory()
-
+    
+    STORY = require 'stories.abyssal' --TODO add way to change story
+    
     -- Loading assets
-    Fonts.main = G.newFont("RobotoMonoNerdFontMono-Bold.ttf")--("FiraCodeNerdFont-Bold.ttf")
-    Fonts.menu = G.newFont("RobotoMonoNerdFontMono-Bold.ttf", 16)
+    Fonts.main = G.newFont("fonts/RobotoMonoNerdFontMono-Bold.ttf")--("FiraCodeNerdFont-Bold.ttf")
+    Fonts.menu = G.newFont("fonts/RobotoMonoNerdFontMono-Bold.ttf", 16)
+    Fonts.notify = G.newFont("fonts/RobotoMonoNerdFontMono-Bold.ttf", 16)
     G.setFont(Fonts.main)
 
     Music.space = A.newSource("music/Andy G. Cohen - Space.mp3", "stream")
@@ -1194,21 +1263,50 @@ function love.load()
     Music.code:setVolume(0.4)
     MusicNames["code"] = "Mystery Mammal - Code Composer"
     
-    Sounds.button = A.newSource("sounds/button.mp3", "static")
+    -- Loading sounds    
+    for _, item in ipairs(love.filesystem.getDirectoryItems( "sounds" )) do
+        if string.ends_with(item, ".mp3") then 
+            local f = string.gsub(item, "%..+", "")
+            print("Loading sound", love.filesystem.getSource().."/sounds/"..item)
+            Sounds[f] = A.newSource('sounds/'..item, "static")
+        end
+    end
+    
+    --[[Sounds.button = A.newSource("sounds/button.mp3", "static")
     Sounds.confirm = A.newSource("sounds/confirm.mp3", "static")
     Sounds.start = A.newSource("sounds/start.mp3", "static")
-    Sounds.yay = A.newSource("sounds/yay.mp3", "static")
+    Sounds.yay = A.newSource("sounds/yay.mp3", "static")]]--
     
-    Sprites.player = G.newImage('sprites/playerblue.png')
-    Sprites.enemy1 = G.newImage('sprites/enemyb.png')
-    Sprites.projectile1 = G.newImage('sprites/shot.png')
-    Sprites.projectile2 = G.newImage('sprites/enemy_shot.png')
-    Sprites.pow = G.newImage('sprites/pow.png')
-    Sprites.meteor1 = G.newImage('sprites/Meteors/meteorBrown_med1.png')
+    -- Loading sprites    
+    for _, item in ipairs(love.filesystem.getDirectoryItems( "sprites" )) do
+        if string.ends_with(item, ".png") then 
+            local f = string.gsub(item, "%..+", "")
+            print("Loading sprite", love.filesystem.getSource().."/sprites/"..item)
+            Sprites[f] = G.newImage('sprites/'..item)
+        end
+    end
+    
+    --Sprites.player = G.newImage('sprites/playerblue.png')
+    --Sprites.crew = G.newImage('sprites/crew.png')
+    --Sprites.wall = G.newImage('sprites/wall.png')
+    --Sprites.enemy1 = G.newImage('sprites/enemyb.png')
+    --prites.projectile1 = G.newImage('sprites/shot.png')
+    --Sprites.projectile2 = G.newImage('sprites/enemy_shot.png')
+    --Sprites.pow = G.newImage('sprites/pow.png')
+    --[[Sprites.meteor1 = G.newImage('sprites/Meteors/meteorBrown_med1.png')
     Sprites.meteor2 = G.newImage('sprites/Meteors/meteorBrown_med3.png')
     Sprites.meteor3 = G.newImage('sprites/Meteors/meteorBrown_big1.png')
     Sprites.meteor4 = G.newImage('sprites/Meteors/meteorBrown_big2.png')
-    Sprites.meteor5 = G.newImage('sprites/Meteors/meteorBrown_big3.png')
+    Sprites.meteor5 = G.newImage('sprites/Meteors/meteorBrown_big3.png')]]--
+    
+    -- Loading tiles    
+    for _, item in ipairs(love.filesystem.getDirectoryItems( "tiles" )) do
+        if string.ends_with(item, ".png") then 
+            local f = string.gsub(item, "%..+", "")
+            print("Loading tile", love.filesystem.getSource().."/tiles/"..item, "as", f)
+            Tiles[f] = G.newImage('tiles/'..item)
+        end
+    end
     
     -- Setting up save files
     if FS.getInfo(GlobalFileName) == nil then
@@ -1219,104 +1317,39 @@ function love.load()
         GlobalSave = LoadFile(GlobalFileName)
     end
 
-    -- Loading extra scripts
-    local connect_extension = function(f)
-        print("Adding extension: ",f.name)
-        --local rancscript = false
-        local iscenes = 0
-        local iai = 0
-        local ispawners = 0
-        local ievents = 0
-        local icmd = 0
-        local ims = 0
-        
-        if f.on_connect ~= nil then 
-            f.on_connect() 
-            --rancscript = true
-        end
-        
-        if f.scenes ~= nil then
-            for k, v in pairs(f.scenes) do
-                print("Linked scene:      ",k)
-                Scenes[k] = v
-                iscenes = iscenes + 1
-            end
-        end
-        if f.ai_scripts ~= nil then
-            for k, v in pairs(f.ai_scripts) do
-                print("Linked AI script: ", k)
-                AIScripts[k] = v
-                iai = iai + 1
-            end
-        end
-        if f.spawners ~= nil then
-            for k, v in pairs(f.spawners) do
-                print("Linked Spawner: ",k)
-                Spawner[k] = v
-                ispawners = ispawners + 1
-            end
-        end
-        if f.events ~= nil then
-            for k, v in pairs(f.events) do
-                print("Linked Event:      ", k.." // "..v.title)
-                Events[k] = v
-                ievents = ievents + 1
-            end
-        end
-        if f.commands ~= nil then
-            for k, v in pairs(f.commands) do
-                print("Linked Command: ",k)
-                CustomCommands[k] = v
-                icmd = icmd + 1
-            end
-        end
-        if f.menu_systems ~= nil then
-            for k, v in pairs(f.menu_systems) do
-                print("Linked Menu System: ",k)
-                MenuSystems[k] = v
-                ims = ims + 1
-            end
-        end
-        print("Scenes: "..iscenes.." | AI scripts: ".. iai.." | Spawners: "..ispawners.." | Events: "..ievents.." | Commands: "..icmd.." | Menus: "..ims)
-    end
-    
-    local sc = love.filesystem.getDirectoryItems( "scripts" )
-    
-    for _, item in ipairs(sc) do
+    -- Loading extra scripts        
+    for _, item in ipairs(love.filesystem.getDirectoryItems( "scripts" )) do
         if string.ends_with(item, ".lua") then 
-            print("Loading", love.filesystem.getSource().."/scripts/"..item)
-            connect_extension(dofile(love.filesystem.getSource().."/scripts/"..item))
+            print("Loading script", love.filesystem.getSource().."/scripts/"..item)
+            local ext = dofile(love.filesystem.getSource().."/scripts/"..item)
+            if ext.autoload then ConnectExtension(ext) end
         end
     end
     
     -- Loading mods
     if FS.getInfo("mods") == nil then love.filesystem.createDirectory( "mods" ) end
     
-    local mods = love.filesystem.getDirectoryItems( "mods" )
-    
-    for _, item in ipairs(mods) do
+    for _, item in ipairs(love.filesystem.getDirectoryItems( "mods" )) do
         if string.ends_with(item, ".lua") then 
             print("Loading", SaveDir.."/mods/"..item)
-            connect_extension(dofile(SaveDir.."/mods/"..item))
+            ConnectExtension(dofile(SaveDir.."/mods/"..item))
         end
     end
     
     Scene.set("menu_main")
 end
 
-function OpenConsole()
-    ConsoleOpen = true
-    Paused = true
-end
-
-function CloseConsole()
-    ConsoleOpen = false
-    Paused = false
-end
-
 function love.keypressed( key, scancode, isrepeat )
     -- Global system binds
+    local blocking = false
     
+    for _, v in pairs(Hooks.keypress) do
+        blocking = v(key, scancode, isrepeat)
+    end
+    
+    if blocking then return end
+    
+    --TODO delete this once options menu is complete
     if key == "f11" then 
         if GlobalSave.system.music == true then DisableMusic() else EnableMusic() end
         return
@@ -1326,54 +1359,11 @@ function love.keypressed( key, scancode, isrepeat )
         Paused = not Paused
         return
     end
-    
-    if key == "`" then
-        if ConsoleOpen then CloseConsole() else OpenConsole() end
-        return
-    end
-    
-    if key == "backspace" and ConsoleOpen then
-        --print("Deleting")
-        ConsoleInput = string.sub(ConsoleInput, 1, -2)
-        return
-    end
-    
-    if key == "return" and ConsoleOpen then
-        HandleConsole()
-        return
-    end
-    
-    if key == "pageup" and ConsoleOpen then
-    if ConsoleLogStart >= #ConsoleMsgs then return end 
-        ConsoleLogStart = ConsoleLogStart + 1
-    end
-    
-    if key == "pagedown" and ConsoleOpen then
-        if ConsoleLogStart <= 1 then return end 
-        ConsoleLogStart = ConsoleLogStart - 1
-    end
-    
-    if key == "down" and ConsoleOpen then
-        if ConsoleLogPointer <= 1 then 
-            ConsoleInput = ""
-            return
-        end
-        ConsoleLogPointer = ConsoleLogPointer - 1
-        ConsoleInput = ConsoleLog[ConsoleLogPointer]
-        return
-    end
-    
-    if key == "up" and ConsoleOpen then
-        if ConsoleLogPointer >= #ConsoleLog then return end
-        ConsoleLogPointer = ConsoleLogPointer + 1
-        ConsoleInput = ConsoleLog[ConsoleLogPointer]
-        return
-    end
-    
-    
-    if HandleMenuInput(key) then return end
+
     
     if not ConsoleOpen then
+        if HandleMenuInput(key) then return end
+        
         Scene.get().keypress(key, scancode, isrepeat)
     end
 end
@@ -1391,116 +1381,58 @@ function love.update(dt)
     end
     if not Paused and Scene.get().update ~= nil then
         Scene.get().update(dt)
+        for _, v in pairs(Hooks.update) do
+            v()
+        end
     end
 end
 
 ShowMusic = true
-ConsoleInput = ""
-ConsoleLogPointer = 0
-ConsoleLog = {}
-ConsoleMsgs = {}
 
-function AddLog(t)
-    table.insert(ConsoleLog, 1, tostring(t))
-end
-
-function HandleConsole()
-    if ConsoleInput == "" then return end
-    table.insert(ConsoleLog, 1, ConsoleInput)
-    table.insert(ConsoleMsgs, 1, "$ "..ConsoleInput)
-    ExecCommand(ConsoleInput)
-    ConsoleInput = ""
-end
-
-function ExecCommand(cmdln)
-    cmdln = string.strip(cmdln)
-    if string.contains(cmdln, "|") then
-        for _, newln in ipairs(string.split(cmdln, "|")) do
-            print("Branching command: ", newln)
-            ExecCommand(newln)
-            
-        end
-        return
-    end
-    local cmd = ""
-    local val = ""
-    
-    -- If there is spaces in the string, split the input so word 1 is the command and the rest is the parameters
-    if select(2, string.gsub(cmdln, " ", "")) >= 1 then
-        cmd, val = string.match(cmdln, "(%S+)%s(.*)")
-    else
-        cmd = cmdln
-    end
-    
-
-    if cmd == "run" then
-        print("Running ", val)
-        local success, result = pcall(function()
-            local chunk = load(val)
-            if chunk ~= nil then
-                chunk()
-            end
-        end)
-        print("result: ", success, result)
-        if result ~= nil then
-            if success then
-            -- Code executed successfully
-                AddLog("Result:" .. result)
-            else
-            -- Error occurred
-                AddLog("Error:" .. result)
-            end
-        end
-        return true
-    elseif cmd == "goto" or cmd == "event" then
-        ActivateEvent(val)
-        return true
-    elseif cmd == "scene" then
-        Scene.set(val)
-        return true
-    elseif cmd == "debug" then
-        DebugMode = not DebugMode
-        AddLog("Debug Mode: "..tostring(DebugMode))
-        return true
-    elseif cmd == "end" then
-        Scene.set("ship_main")
-        return true
-    elseif cmd == "quit" then
-        love.event.quit()
-    elseif cmd == "get" then
-        local str = "return "..val
-        print("EXEC: ",str)
-        local func = load(str)
-        return func()
-    else
-        for k, v in pairs(CustomCommands) do
-            if cmd == k then 
-                v(val)
-            end
-        end
-        return ExecCommand("run "..cmdln)
-    end
-    return nil
-end
 
 function love.textinput(t)
-    if ConsoleOpen and t ~= "`" then
-        ConsoleInput = ConsoleInput .. t
+    for _, v in pairs(Hooks.textinput) do
+        v(t)
     end
+    
     if Scene.get().textinput ~= nil then
         Scene.get().textinput(t)
     end
 end
-ConsoleLogStart = 1
 
-function love.draw()
-    ---print(G.getColor())
-    --love.graphics.clear()
-    --if not ConsoleOpen then
+function love.mousepressed( x, y, button, istouch, presses )
+    if Scene.get().mousepressed ~= nil then
+        Scene.get().mousepressed(x, y, button, istouch, presses)
+    end
+end
+
+function love.mousemoved( x, y, dx, dy, istouch )
+    if Scene.get().mousemoved ~= nil then
+        Scene.get().mousemoved(x, y, dx, dy, istouch)
+    end
+end
+
+function love.draw() 
+    for _, v in pairs(Hooks.predraw) do
+        v()
+    end
+    
+    if ShowGrid then
+        love.graphics.setColor({1, 1, 1, 0.5})
+        local tileSize = 32
+        local rows = math.ceil(G.getHeight() / tileSize)
+        local cols = math.ceil(G.getWidth() / tileSize)
+        for i = 1, rows do
+            for j = 1, cols do
+                G.rectangle("line", (j - 1) * tileSize, (i - 1) * tileSize, tileSize, tileSize)
+            end
+        end
+        love.graphics.setColor({1, 1, 1, 1})
+    end
+    
     if Scene.get().draw ~= nil then
         Scene.get().draw()
     end
-    --end
     
     if ShowMusic and GlobalSave.system.music then
         local name = MusicNames[StoredMusic]
@@ -1515,30 +1447,12 @@ function love.draw()
     end
     
     RenderMenu()
-    
-    if ConsoleOpen then
-        local ci = "> "..ConsoleInput
-        love.graphics.setColor({0,0,0, 1})
-        love.graphics.rectangle("fill", 0, G.getHeight()-15, Fonts.main:getWidth(ci), Fonts.main:getHeight())
-        love.graphics.setColor({1, 1, 1, 1})
-        G.print(ci, 0, G.getHeight()-15)
-        
-        local range = {}
-        local endpoint = ConsoleLogStart + 20
-        table.move(ConsoleLog, ConsoleLogStart, endpoint - 1, 1, range)
 
-        local i = 25
-        for ln, log in ipairs(range) do
-            local text = ConsoleLogStart - 1 + ln.." " .. log
-            love.graphics.setColor({0, 0, 0, 1})
-            love.graphics.rectangle("fill", 0, G.getHeight()-15-i, Fonts.main:getWidth(text), Fonts.main:getHeight())
-            love.graphics.setColor({1, 1, 1, 1})
-            G.print(text, 0, G.getHeight()-15-i)
-            i = i + 20
-            if ln >= endpoint then break end
-        end
-        --
+    for _, v in pairs(Hooks.postdraw) do
+        v()
     end
+    
+    
 end
 
 function love.quit()

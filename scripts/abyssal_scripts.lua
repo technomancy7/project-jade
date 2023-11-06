@@ -3,14 +3,17 @@ return {
     -- Name of our script
     name = "abyssal",
     
+    autoload = false,
+    
     -- Author name
     author = "Technomancer",
     
     -- Function that runs on loading, if any setup is needed
     on_connect = function()
-        print("Test extension loaded.")
+        print("Abyssal Story scripts loaded.")
     end,
-    
+    hooks = {
+    },
     events = {
         testalt = {
             title = "A test encounter?",
@@ -90,7 +93,8 @@ return {
             -- run <code>  =  execute arbitrary lua code
             -- end  =  go back to the ship scene, essentially sugar for `scene ship_main`
             choices = {
-                {"The computer speaks to me...", "goto awakening2"}
+                {"The computer speaks to me...", "goto awakening2"},
+                {"Skip intro! [start encounter]", "scene field_scene"},
             }
         },
         awakening2 = {
@@ -104,7 +108,7 @@ return {
             
             -- if get_input is present, choices are not shown, instead it will be a text box for getting user input
             -- the input text is then used for the $input value in the on_send paramater
-            get_input = {default_text = "PlayerData().name", run = "PlayerData().name = \"|input|\" | goto awakening3"}
+            get_input = {default_text = function() return PlayerData().name end, run = "PlayerData().name = \"|input|\" | goto awakening3"}
         },
         awakening3 = {
             title = "Awakening",
@@ -114,7 +118,7 @@ return {
             Yes, that does appear to be correct.
             And just for verification purposes, what is the name of your ship?"
             ]],
-            get_input = {default_text = "PlayerData().ship_name", run = "PlayerData().ship_name = \"|input|\" | goto awakening4"}
+            get_input = {default_text = function() return PlayerData().ship_name end, run = "PlayerData().ship_name = \"|input|\" | goto awakening4"}
         },
         awakening4 = {
             title = "Awakening",
@@ -131,7 +135,9 @@ return {
             }
         },
     },
-    -- Table that is merged in to the global scens
+    
+    -- Table that is merged in to the global scenes
+    -- TODO split the logic of the combat/field scene in to a generic template that can be re-used
     scenes = {
         combat = {
             vars = {
@@ -265,7 +271,6 @@ return {
             end,
             draw = function()
                 DrawHUD()
-                DoFloatingText()
 
                 for _, ent in ipairs(EntityList) do ent:draw() end
                 
@@ -282,6 +287,65 @@ return {
                 print("Entity cleanup complete. "..tostring(#EntityList))
             end
         },
+        field_scene = { --TODO work on field system logic here
+            vars = {
+                CombatMode = false
+            },
+            keypress = function( key, scancode, isrepeat ) 
+            
+                local p = Player()
+                --print(p.name)
+                if table.contains(GlobalSave.keys.move_right, key) then
+                    p:start_move("x", 1)
+                end
+
+                if table.contains(GlobalSave.keys.move_left, key) then
+                    p:start_move("x", -1)
+                end
+
+                if table.contains(GlobalSave.keys.move_down, key) then
+                    p:start_move("y", 1)
+                end
+
+                if table.contains(GlobalSave.keys.move_up, key) then
+                    p:start_move("y", -1)
+                end
+            
+            end,
+            opening = function()
+                PlayMusic("space")
+                LastID = 0
+                local p = Spawner.fieldcrew(5, 5, CurrentSave.crew[1])
+                p.player = true
+                
+                Spawner.fieldcrew(10, 10, CurrentSave.crew[2])
+                --p.player = true
+            end,
+            update = function(dt)
+                
+
+                for _, ent in ipairs(EntityList) do
+                    if ent.ai ~= nil then ent:ai() end
+                    ent:process_movement()
+                end
+            end,
+            draw = function()
+                --DrawHUD()
+                DoFloatingText()
+
+                for _, ent in ipairs(EntityList) do ent:draw() end
+            end,
+            closing = function()
+                print("Cleaning up "..tostring(#EntityList).." entities.")
+                while #EntityList > 0 do
+                    for _, ent in ipairs(EntityList) do
+                        ent:remove_from_world()
+                    end
+                end
+                
+                print("Entity cleanup complete. "..tostring(#EntityList))
+            end
+        }
     },
     
     -- Merged in to the global AI scripts
@@ -321,8 +385,25 @@ return {
             end
         end,
     },
+    
     -- Merged in to the global AI scripts
     spawners = {
+        -- Field Crew, for tile-based players
+        fieldcrew = function(x, y, crew_member)
+            local p = Entity:new(x * 32, y*32)
+            print(crew_member.name)
+            p.tile_based = true
+            p.sprite = Sprites.crew
+            p.health = crew_member.health
+            p.energy = crew_member.energy
+            p.name = crew_member.name
+            p.sounds["hit"] = A.newSource("sounds/hit.mp3", "static")
+            p.sounds["shoot"] = A.newSource("sounds/shoot.mp3", "static")
+            --p.player = true
+            p:add_to_world()
+            
+            return p
+        end,
         meteor1 = function(x, y) 
             local spawned = Entity:new(x, y)
             spawned.alliance = -1

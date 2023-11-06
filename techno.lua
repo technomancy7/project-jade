@@ -31,6 +31,12 @@ function IsDir(name)
   return (FileExists(name) and not IsFile(name))
 end
 
+function table.len(T)
+  local count = 0
+  for _ in pairs(T) do count = count + 1 end
+  return count
+end
+
 function table.has_value(tab, val)
   for _, value in ipairs(tab) do if value == val then return true end end
   return false

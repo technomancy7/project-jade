@@ -1,5 +1,3 @@
-print("Loading story Abyssal Odyssey")
-
 local class = require 'middleclass'
 EntityList = {}
 
@@ -13,10 +11,21 @@ function Entity:initialize(x, y)
     
     self.player = false
     
+    self.name = ""
+    
     -- Defining location on the screen
     self.x = x or 0
     self.y = y or 0
-
+    
+    -- Defining location of sprite for field scene, seperate from the raw object location, to allow smoth sprite movement when snapping between cells
+    self.fsx = 0
+    self.fsy = 0
+    
+    self.sprite_speed = 4
+    
+    -- Ugly switch for changing between logic, behaving as tile-based instead of pure movement
+    self.tile_based = false
+    
     -- How fast the sprite moves
     self.move_speed = 5
 
@@ -86,15 +95,22 @@ end
 function Entity:draw()
     if self.sprite == nil then return end
     if self.hidden == true then return end
+    local myx = self.x
+    local myy = self.y
+    if self.tile_based then
+        myx = self.fsx-- * 32
+        myy = self.fsy-- * 32
+        G.print("\n"..self.name, myx-40, myy-40)
+    end
     
-    G.draw(self.sprite, self.x, self.y, self.rotation, self.size, self.size, self.sprite:getWidth() / 2, self.sprite:getHeight() / 2)
+    G.draw(self.sprite, myx, myy, self.rotation, self.size, self.size, self.sprite:getWidth() / 2, self.sprite:getHeight() / 2)
     
     if DebugMode then
-        G.print("\nID: "..tostring(self.id).."\nALLIANCE: "..tostring(self.alliance).."\nOWNER: "..tostring(self.owner).."\nLOC: "..tostring(self.x).."."..tostring(self.y).."\nSPRITE: "..self.sprite:getWidth().."x"..self.sprite:getHeight(), self.x, self.y+20)
+        G.print("\nID: "..tostring(self.id).."\nALLIANCE: "..tostring(self.alliance).."\nOWNER: "..tostring(self.owner).."\nLOC: "..tostring(myx).."."..tostring(myy).."\nSPRITE: "..self.sprite:getWidth().."x"..self.sprite:getHeight(), myx, myy+20)
         
         local ox = self.sprite:getWidth()/2 
         local oy = self.sprite:getHeight()/2 
-        G.rectangle("line", self.x - ox, self.y - oy, ox * 2, oy * 2)
+        G.rectangle("line", myx - ox, myy - oy, ox * 2, oy * 2)
     end
     
 end
@@ -359,9 +375,31 @@ function Entity:shift_to(x, y)
     if self.y > y then self.y = self.y - (self.move_speed * GameSpeed) end
 end
 
-function Entity:start_move(dir, amt)
+function Entity:fmove(dir, amt)
     if dir == "x" or dir == "y" then
-        self["velocity_" .. dir] = amt
+        self[dir] = self[dir] + amt
+    end
+end
+
+function Entity:start_move(dir, amt)
+    --print(self.tile_based, dir, amt)
+    if self.tile_based then
+        local new_value = self[dir] + (amt * 32)
+        if new_value <= 0 then return end
+        
+        if dir == "x" then
+            local max_wid = G.getWidth()
+            if new_value >= max_wid then return end
+            self[dir] = new_value
+        elseif dir == "y" then
+            local max_height = G.getHeight()
+            if new_value >= max_height then return end
+            self[dir] = new_value
+        end
+    else
+        if dir == "x" or dir == "y" then
+            self["velocity_" .. dir] = amt
+        end
     end
 end
 
@@ -382,41 +420,60 @@ function Entity:start_move_right(amt)
 end
 
 function Entity:process_movement()
-    if self.velocity_x > 0 then
-        self.direction = "right"
-        self.rotation = 1.6
-        self.velocity_x = self.velocity_x - (self.velocity_decay * GameSpeed)
-        if self.x < (G.getWidth() - (self.sprite:getWidth() / 2)) then
-            self.x = self.x + (self.velocity_x * GameSpeed)
+    if self.tile_based then
+        if self.fsx > self.x then
+            self.fsx = self.fsx - self.sprite_speed
         end
-    end
+        if self.fsy > self.y then
+            self.fsy = self.fsy - self.sprite_speed
+        end
+        if self.fsx < self.x then
+            self.fsx = self.fsx + self.sprite_speed
+        end
+        if self.fsy < self.y then
+            self.fsy = self.fsy + self.sprite_speed
+        end
+        --print(self.name, self.player, self.fsx, self.fsy, self.x, self.y)
+    else
+        if self.velocity_x > 0 then
+            self.direction = "right"
+            self.rotation = 1.6
+            self.velocity_x = self.velocity_x - (self.velocity_decay * GameSpeed)
+            if self.x < (G.getWidth() - (self.sprite:getWidth() / 2)) then
+                self.x = self.x + (self.velocity_x * GameSpeed)
+            end
+        end
 
-    if self.velocity_y > 0 then
-        self.direction = "down"
-        self.rotation = 3.15
-        self.velocity_y = self.velocity_y - (self.velocity_decay * GameSpeed)
-        if self.y <  (G.getHeight() - (self.sprite:getHeight() / 2)) then
-            self.y = self.y + (self.velocity_y * GameSpeed)
+        if self.velocity_y > 0 then
+            self.direction = "down"
+            self.rotation = 3.15
+            self.velocity_y = self.velocity_y - (self.velocity_decay * GameSpeed)
+            if self.y <  (G.getHeight() - (self.sprite:getHeight() / 2)) then
+                self.y = self.y + (self.velocity_y * GameSpeed)
+            end
         end
-    end
 
-    if self.velocity_x < 0 then
-        self.direction = "left"
-        self.rotation = 4.7
-        self.velocity_x = self.velocity_x + (self.velocity_decay * GameSpeed)
-        if self.x > (self.sprite:getWidth() / 2) then
-            self.x = self.x - -(self.velocity_x * GameSpeed)
+        if self.velocity_x < 0 then
+            self.direction = "left"
+            self.rotation = 4.7
+            self.velocity_x = self.velocity_x + (self.velocity_decay * GameSpeed)
+            if self.x > (self.sprite:getWidth() / 2) then
+                self.x = self.x - -(self.velocity_x * GameSpeed)
+            end
         end
-    end
 
-    if self.velocity_y < 0 then
-        self.direction = "up"
-        self.rotation = 0
-        self.velocity_y = self.velocity_y + (self.velocity_decay * GameSpeed)
-        if self.y > (self.sprite:getHeight() / 2) then
-            self.y = self.y - -(self.velocity_y * GameSpeed)
+        if self.velocity_y < 0 then
+            self.direction = "up"
+            self.rotation = 0
+            self.velocity_y = self.velocity_y + (self.velocity_decay * GameSpeed)
+            if self.y > (self.sprite:getHeight() / 2) then
+                self.y = self.y - -(self.velocity_y * GameSpeed)
+            end
         end
+    
     end
+    
+
 end
 
 -- END ENTITY
@@ -433,20 +490,3 @@ function GetEntity(id)
         if tostring(ent.id) == tostring(id) then return ent end
     end
 end
-
--- Crew management
-function AddCrew(name)
-    table.insert(CurrentSave.crew, { name = name, health = 100, energy = 100, commands = {} })
-    return #CurrentSave.crew
-end
-
-return {
-    start_scene = "awakening",
-    main_scene = "ship_main",
-    story_name = "Abyssal Odyssey",
-    story_author = "Technomancer",
-    
-    entity = Entity,
-    add_crew = AddCrew,
-    space_player = Player
-}
