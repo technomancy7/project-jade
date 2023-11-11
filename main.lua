@@ -443,7 +443,7 @@ Scenes = {
                     
                     y = y+20
                     WindowManager.Button("Github", x, y, data, function()
-                        love.system.openURL("file://"..love.filesystem.getSaveDirectory())
+                        love.system.openURL("https://github.com/technomancy7/project-jade")
                     
                     end)
                     
