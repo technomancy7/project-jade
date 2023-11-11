@@ -331,7 +331,7 @@ return {
             end,
             draw = function()
                 --DrawHUD()
-                DoFloatingText()
+                --DoFloatingText()
 
                 for _, ent in ipairs(EntityList) do ent:draw() end
             end,
@@ -345,7 +345,109 @@ return {
                 
                 print("Entity cleanup complete. "..tostring(#EntityList))
             end
-        }
+        },
+        ship_main = {
+            vars = {
+                -- Cooldown for activator that enables heading to event
+                cooldown = 0,
+                
+                searching_for_event = false,
+                search_time = 0
+            },
+            keypress = function( key, scancode, isrepeat ) 
+                if key == "f2" then 
+                    local i = WriteSave()
+                    AddNotify("Saved state to slot "..tostring(i)..".")
+                end
+                if key == "f12" then 
+                    WriteSave()
+                    Scene.set("menu_main")
+                end
+            end,
+            opening = function() 
+                PlayMusic("code")
+                SV().cooldown = 30
+                SV().searching_for_event = false
+                SV().search_time = 0
+                if CurrentSave.player.health <= 0 then CurrentSave.player.health = 5 end
+                
+                -- TODO make a toggle for whether or not to auto-save
+                print("Saving.")
+                WriteSave()
+            end,
+            update = function(dt)
+                if SV().searching_for_event then 
+                    for _, key in ipairs(GlobalSave.keys.cancel) do
+                        if KB.isDown(key) then
+                            SV().searching_for_event = false
+                            SV().search_time = 0
+                            SV().cooldown = 30
+                            return
+                        end
+                    end
+                    return
+                end
+                
+                for _, key in ipairs(GlobalSave.keys.confirm) do
+                    if KB.isDown(key) and SV().cooldown == 0 then
+                        --DispatchEvent()
+                        Sfx("start")
+                        SV().searching_for_event = true
+                        return
+                    end
+                end
+                
+                if KB.isDown("f12") then 
+                    Scene.set("menu_main") 
+                    return
+                end
+                
+                if SV().cooldown > 0 then SV().cooldown = SV().cooldown - 1 end
+            end,
+            second = function()
+                if SV().searching_for_event then
+                    SV().search_time = SV().search_time + 1
+                    PlayerData().fuel = PlayerData().fuel - 1
+                    
+                    local randomNum = math.random(1, 50)
+                    if randomNum <= SV().search_time then
+                        DispatchEvent()
+                    end
+                end
+            end,
+            draw = function() 
+                if SV().searching_for_event then
+                    FadeBGTo(100, 25, 25)
+                    
+                    if TotalSeconds % 3 == 0 then
+                        G.print(" Drifting in the depths of space..", 0, 250)
+                        
+                    elseif TotalSeconds % 3 == 1 then
+                        G.print(" Drifting in the depths of space...", 0, 250)
+                        
+                    elseif TotalSeconds % 3 == 2 then
+                        G.print(" Drifting in the depths of space....", 0, 250)
+                    end
+                    G.print(" "..tostring(SV().search_time).." seconds since last event.", 0, 270)
+                    G.print(" "..tostring(PlayerData().fuel).." fuel remaining.", 0, 290)
+                    G.print(GetKey("cancel").." to stop the engines.", 400, 0)
+                else
+                    FadeBGTo(0, 0, 0)
+                    DrawHUD()
+                    
+                    if SV().cooldown == 0 then
+                        G.print(" | Press "..GetKey("confirm").." to launch.", 400, 0)
+                    else
+                        G.print(" | Engines charging: "..tostring(SV().cooldown), 400, 0)
+                    end
+                    
+                    G.print("Crew: "..tostring(#CurrentSave.crew), 0, 400)
+                    G.print("Crew 1: "..CurrentSave.crew[1].name, 0, 425)
+                end
+
+            end,
+            closing = function() end
+        },
     },
     
     -- Merged in to the global AI scripts

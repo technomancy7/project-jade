@@ -2,6 +2,10 @@
 ---@diagnostic disable: unused-local
 ---@diagnostic disable-next-line: trailing-space
 ---@diagnostic disable: trailing-space
+---@diagnostic disable-next-line: deprecated
+---@diagnostic disable: deprecated
+
+JADE_VERSION = "0.0.40"
 
 local class = require 'middleclass'
 local techno = require 'techno'
@@ -11,6 +15,28 @@ require "entity"
 
 -- TODO
 --[[
+Extend Windows system, allow for disabling titlebar (including moving shading and closing) and optionally show a little name card like menus
+
+Util functions for window elemts, like buttons
+
+Everything rpg based on skills, weapons, armour, also hacking, fishing 
+
+Also add a close button to notifs, and maybe a pin button to prevent auto closing
+
+Sheets support for tiles and sprites
+Tile properties table, to add values for each tile, like define wall with solid
+
+Add support for gauges to have borders
+
+System for screen covers, creating an image to cover the screen
+For some transitions, create a cover of some loading screen
+Different ways of creating and destroying, either using transparency to fade it out, or scrolling it out
+
+Options to turn shooter section in to side or down scrollers, like locking direction of player, disabling certain movements (maybe those keys change speed instead)
+
+Actually implement Continue from last save in menu, make sure last used save in global actual gets saved to file and loaded next time
+
+
 menu system (
 make command menu font inherit from the menu object, which inherits from global, but can be overwritten
 add options for command menu
@@ -77,7 +103,6 @@ Build a 3d array of coordinates pointing to the tile info when map is loaded in,
 GlobalFileName = "global.json"
 Green = {0, 1, 0}
 Red = {1, 0, 0}
-
 -- Aliases
 
 G = love.graphics
@@ -88,7 +113,7 @@ A = love.audio
 
 -- Variables
 
-SaveDir = nil
+SaveDir = ""
 CurrentMusic = nil
 StoredMusic = nil
 Paused = false
@@ -312,8 +337,9 @@ Scene = {
 Scenes = {
     menu_main = {
         vars = {
-            SelectedSlot = GlobalSave.system.savefile,
-            Slots = {}
+            --SelectedSlot = GlobalSave.system.savefile,
+            --Slots = {}
+            saves = {}
         },
         keypress = function( key, scancode, isrepeat ) 
             if not IsMenuOpen() then
@@ -327,7 +353,7 @@ Scenes = {
             AddMenuCommand({text = "New Story", hover_text = "Starts a brand new story.",
             
             callback = function()
-                    if LoadSave() then
+                    --[[if LoadSave() then
                         if not CurrentSave.flags.done_tutorial then
                             ActivateEvent(STORY.start_scene)
                         else
@@ -336,40 +362,97 @@ Scenes = {
                         Sfx("confirm")
                         CloseAllMenu()
                         return
-                    else
-                        SaveFile(GetSaveFile(), DefaultSave)
-                        SV().Slots[tostring(SV().SelectedSlot)] = DefaultSave
+                    else]]--
+                        GlobalSave.system.savefile = GetNextSaveID()
+                        AddNotify("Initializing save slot "..tostring(GlobalSave.system.savefile))
+                        SaveFile(GetSaveFile(GlobalSave.system.savefile), DefaultSave)
                         Sfx("confirm")
                         CloseAllMenu()
-                        LoadSave()
+                        WindowManager.destroy("Development")
+                        LoadSave("default")
                         if not CurrentSave.flags.done_tutorial then
                             ActivateEvent(STORY.start_scene)
                         else
                             Scene.set(STORY.main_scene)
                         end
-                        return
-                    end
+                        
+                    --end
             end})
-            AddMenuCommand({text = "Load Save"})
-            AddMenuCommand({text = "Save Slot", hover_text = "Changes which save slot to use by default.",
+            
+            SV().saves = ListSaves()
+            AddMenuCommand({text = "Load Save", callback = function()
+                CreateMenu({title = "Load Saves"})
+                for _, i in ipairs(SV().saves) do
+                    AddMenuCommand({text = "Save "..tostring(i).." ("..ParseSave(i).player.name..")", data = {id = i}, callback = function(data)
+                        print("Will load", data.id)
+                        CloseAllMenu()
+                        WindowManager.destroy("Development")
+                        LoadSave(data.id)
+                        if not CurrentSave.flags.done_tutorial then
+                            ActivateEvent(STORY.start_scene)
+                        else
+                            Scene.set(STORY.main_scene)
+                        end
+                    end})
+                end
+                
+                AddMenuCommand({text = "Back", callback = RemoveMenu})
+            end})
+            --[[AddMenuCommand({text = "Save Slot", hover_text = "Changes which save slot to use by default.",
             
             value = function() return GlobalSave.system.savefile end,
             
             scroll_left = function() GlobalSave.system.savefile = GlobalSave.system.savefile - 1 end,
     
             scroll_right = function() GlobalSave.system.savefile = GlobalSave.system.savefile + 1 end})
-            
+            ]]--
             AddMenuCommand({text = "Settings", callback = function()
                 CreateMenu({title = "Settings", on_close = function() print("Settings menu closed.") end})
-                AddMenuCommand({text = "Music"})
+                AddMenuCommand({text = "Music", value = function() return GlobalSave.system.music end,
+                
+                callback = function() 
+                    local r = ToggleMusic()
+                    AddNotify("Music: "..r)
+                end})
                 AddMenuCommand({text = "Music Volume"})
+                AddMenuCommand({text = "Open App Data Directory", callback = function()
+                    love.system.openURL("file://"..love.filesystem.getSaveDirectory())
+                end})
                 AddMenuCommand({text = "Back", callback = RemoveMenu})
             end})
             
             AddMenuCommand({text = "Credits", callback = function()
-                CreateMenu()
-                AddMenuCommand({text = "It's me!"})
-                AddMenuCommand({text = "Back", callback = RemoveMenu})
+                WindowManager.spawn("Development", 100, 100, 340, 200)
+                --WindowManager.fmt("Development", "disable_titlebar", true)
+                --WindowManager.fmt("Development", "show_namecard", true)
+                WindowManager.add_element("Development", "text1", function(x, y, w, h, data)
+                    data = data or {}
+                    x = x+5
+                    y = y+10
+                    G.print("Jade Framework "..JADE_VERSION, x, y)
+                    
+                    y = y+10
+                    local major, minor, revision, codename = love.getVersion( )
+                    G.print("Built in Love2d "..major.."."..minor.."."..revision.." ("..codename..")", x, y)
+                    
+                    y = y+10
+                    G.print("Written by Kaiser (@_technomancer)", x, y)
+                    
+                    y = y+20
+                    G.print("Asset credits todo", x, y)
+                    
+                    y = y+20
+                    WindowManager.Button("Github", x, y, data, function()
+                        love.system.openURL("file://"..love.filesystem.getSaveDirectory())
+                    
+                    end)
+                    
+                    y = y+20
+                    WindowManager.Button("Close Window", x, y, data, function()
+                        WindowManager.destroy("Development")
+                    
+                    end)
+                end)
             end})
             AddMenuCommand({text = "Quit", callback = love.event.quit})
             
@@ -384,104 +467,6 @@ Scenes = {
             if not IsMenuOpen() then
                 G.print("Press any button to start.", 100, 100)
             end
-        end,
-        closing = function() end
-    },
-    ship_main = {
-        vars = {
-            -- Cooldown for activator that enables heading to event
-            cooldown = 0,
-            
-            searching_for_event = false,
-            search_time = 0
-        },
-        keypress = function( key, scancode, isrepeat ) 
-            if key == "f2" then 
-                WriteSave()
-                print("Saved.")
-            end
-        end,
-        opening = function() 
-            PlayMusic("code")
-            SV().cooldown = 30
-            SV().searching_for_event = false
-            SV().search_time = 0
-            if CurrentSave.player.health <= 0 then CurrentSave.player.health = 5 end
-            
-            -- TODO make a toggle for whether or not to auto-save
-            print("Saving.")
-            WriteSave()
-        end,
-        update = function(dt)
-            if SV().searching_for_event then 
-                for _, key in ipairs(GlobalSave.keys.cancel) do
-                    if KB.isDown(key) then
-                        SV().searching_for_event = false
-                        SV().search_time = 0
-                        SV().cooldown = 30
-                        return
-                    end
-                end
-                return
-            end
-            
-            for _, key in ipairs(GlobalSave.keys.confirm) do
-                if KB.isDown(key) and SV().cooldown == 0 then
-                    --DispatchEvent()
-                    Sfx("start")
-                    SV().searching_for_event = true
-                    return
-                end
-            end
-            
-            if KB.isDown("f12") then 
-                Scene.set("menu_main") 
-                return
-            end
-            
-            if SV().cooldown > 0 then SV().cooldown = SV().cooldown - 1 end
-        end,
-        second = function()
-            if SV().searching_for_event then
-                SV().search_time = SV().search_time + 1
-                PlayerData().fuel = PlayerData().fuel - 1
-                
-                local randomNum = math.random(1, 50)
-                if randomNum <= SV().search_time then
-                    DispatchEvent()
-                end
-            end
-        end,
-        draw = function() 
-            if SV().searching_for_event then
-                FadeBGTo(100, 25, 25)
-                
-                if TotalSeconds % 3 == 0 then
-                    G.print(" Drifting in the depths of space..", 0, 250)
-                    
-                elseif TotalSeconds % 3 == 1 then
-                    G.print(" Drifting in the depths of space...", 0, 250)
-                    
-                elseif TotalSeconds % 3 == 2 then
-                    G.print(" Drifting in the depths of space....", 0, 250)
-                end
-                G.print(" "..tostring(SV().search_time).." seconds since last event.", 0, 270)
-                G.print(" "..tostring(PlayerData().fuel).." fuel remaining.", 0, 290)
-                G.print(GetKey("cancel").." to stop the engines.", 400, 0)
-            else
-                FadeBGTo(0, 0, 0)
-                DrawHUD()
-                
-                if SV().cooldown == 0 then
-                    G.print(" | Press "..GetKey("confirm").." to launch.", 400, 0)
-                else
-                    G.print(" | Engines charging: "..tostring(SV().cooldown), 400, 0)
-                end
-                
-                G.print("Crew: "..tostring(#CurrentSave.crew), 0, 400)
-                G.print("Crew 1: "..CurrentSave.crew[1].name, 0, 425)
-            end
-
         end,
         closing = function() end
     },
@@ -695,304 +680,7 @@ Scenes = {
     }
 }
 
-Templates = {
-    
-
-}
-MenuStack = {}
-
-MenuSystems = {
-    command = {
-        draw = function(current) 
-            local x = current.x
-            local y = current.y
-            local w = current.width
-            local h = current.height
-            local font = Fonts.menu
-            local bt = current.border_thickness
-
-            local auto_w = (w == -1)
-            local auto_h = (h == -1)
-            local cent_x = (x == -1)
-            local cent_y = (y == -1)
-
-            for i, cmd in ipairs(current.commands) do
-                if auto_w then
-                    if font:getWidth("> "..cmd.text) > w then
-                        w = font:getWidth("> "..cmd.text)
-                    end
-                end
-                
-                if auto_h then
-                    h = h + font:getHeight()
-                end
-            end
-
-            if cent_x then
-                x = (G.getWidth() - w) / 2
-            end
-
-            if cent_y then
-                y = (G.getHeight() - h) / 2
-            end
-
-            local text_x = x
-            local text_y = y
-
-            if DebugMode then
-                G.print("H "..tostring(h).." // W "..tostring(w), text_x-25, text_y-50)
-                G.print("FH "..tostring(font:getHeight()), text_x-25, text_y-25)
-            end
-
-
-            G.setColor(current.bg)
-            G.rectangle("fill", x-5, y, w+10, h)
-            G.setColor(current.border)
-            G.setLineWidth(bt)
-            G.rectangle("line", x-5, y, w+10, h)
-            G.setLineWidth(1)
-            G.setColor({1, 1, 1, 1})
-
-            if current.title ~= "" then
-                local tf = Fonts.main
-                G.setColor(current.bg)
-                G.rectangle("fill", x-5, y-tf:getHeight(), tf:getWidth(current.title)+10, tf:getHeight())
-                G.setColor(current.border)
-                G.setLineWidth(bt)
-                G.rectangle("line", x-5, y-tf:getHeight(), tf:getWidth(current.title)+10, tf:getHeight())
-                G.setLineWidth(1)
-                G.setColor({1, 1, 1, 1})
-                G.print(current.title, x, y-tf:getHeight())
-            end
-
-            for i, cmd in ipairs(current.commands) do        
-                local prefix = ""
-                
-                if cmd.value ~= nil then
-                    local base_x = text_x+5+w
-                    local base_y = text_y
-                    local txt = "< "..tostring(cmd.value()).." >"
-                    
-                    G.setColor(current.bg)
-                    G.rectangle("fill", base_x, base_y, font:getWidth(txt), font:getHeight())
-                    G.setColor(current.border)
-                    G.setLineWidth(bt)
-                    G.rectangle("line", base_x, base_y, font:getWidth(txt), font:getHeight())
-                    G.setLineWidth(1)
-                    G.setColor({1, 1, 1, 1})
-                    
-                    G.setFont(font)
-                    G.print(txt, base_x, base_y)
-                    G.setFont(Fonts.main)
-                        
-                end
-                
-                if i == current.cursor and cmd.hover_text ~= "" then
-                    local pf = font
-                    local px = 0
-                    local py = 0
-                    
-                    if current.hover_popout_location == "screen_top" then
-                        px = (G.getWidth() - pf:getWidth(cmd.hover_text)) / 2 
-                        py = 0
-                    elseif current.hover_popout_location == "screen_bottom" then
-                        px = (G.getWidth() - pf:getWidth(cmd.hover_text)) / 2 
-                        py = (G.getHeight() - (pf:getHeight() * 2))
-                    end
-
-                    G.setFont(font)
-                    G.setColor(current.bg)
-                    G.rectangle("fill", px, py+pf:getHeight(), pf:getWidth(cmd.hover_text)+10, pf:getHeight())
-                    G.setColor(current.border)
-                    G.setLineWidth(bt)
-                    G.rectangle("line", px, py+pf:getHeight(), pf:getWidth(cmd.hover_text)+10, pf:getHeight())
-                    G.setLineWidth(1)
-                    G.setColor({1, 1, 1, 1})
-                    G.print(cmd.hover_text, px, py+pf:getHeight())
-                    --print(py,cmd.hover_text)
-                    G.setFont(Fonts.main)
-                end
-                
-                if i == current.cursor and cmd.enabled == false then
-                    G.setColor(current.disabled_colour)
-                    prefix = "X "
-                elseif cmd.enabled == false then
-                    G.setColor(current.disabled_colour)
-                elseif i == current.cursor then 
-                    G.setColor(current.select_colour) 
-                    prefix = "> "
-                else
-                    G.setColor(current.text_colour) 
-                end
-                    
-                G.setFont(font)
-                G.print(prefix..cmd.text, text_x, text_y)
-                G.setFont(Fonts.main)
-                if DebugMode then G.print(tostring(text_y), text_x-40, text_y) end
-                
-                G.setColor({1, 1, 1, 1})
-                text_y = text_y + font:getHeight()
-            end
-        end, 
-        key = function(key)
-            if table.contains(GlobalSave.keys.fire_left, key) or table.contains(GlobalSave.keys.move_left, key) then
-                local cmd = GetSelectedMenuCommand()
-                if cmd.scroll_left ~= nil then
-                    cmd.scroll_left()
-                end
-                return true
-            end
-
-            if table.contains(GlobalSave.keys.fire_right, key) or table.contains(GlobalSave.keys.move_right, key) then
-                local cmd = GetSelectedMenuCommand()
-                if cmd.scroll_right ~= nil then
-                    cmd.scroll_right()
-                end
-                return true
-            end
-
-            if table.contains(GlobalSave.keys.fire_up, key) or table.contains(GlobalSave.keys.move_up, key) then
-                local m = GetCurrentMenu()
-                
-                if m.cursor > 1 then 
-                    m.cursor = m.cursor - 1 
-                else
-                    m.cursor = #m.commands
-                end
-                
-                return true
-            end
-
-            if table.contains(GlobalSave.keys.fire_down, key) or table.contains(GlobalSave.keys.move_down, key) then
-                local m = GetCurrentMenu()
-                
-                if m.cursor < #m.commands then 
-                    m.cursor = m.cursor + 1 
-                else
-                    m.cursor = 1
-                end
-                
-                return true
-            end
-
-            if table.contains(GlobalSave.keys.confirm, key) then
-                local m = GetCurrentMenu()
-                
-                if m.commands[m.cursor].callback ~= nil and m.commands[m.cursor].enabled then
-                    Sfx(m.commands[m.cursor].sfx)
-                    m.commands[m.cursor].callback() 
-                end
-                return true
-            end
-
-            if table.contains(GlobalSave.keys.cancel, key) then
-                local m = GetCurrentMenu()
-                print(#MenuStack, m.back_can_close_last)
-                if #MenuStack == 1 and m.back_can_close_last then
-                    RemoveMenu()
-                elseif #MenuStack > 1 then
-                    RemoveMenu()
-                end
-                return true
-            end
-        end
-    }
-}
-
-function IsMenuOpen()
-    return (#MenuStack > 0)
-end
-
-function GetCurrentMenu()
-    return MenuStack[#MenuStack]
-end
-
-function CreateMenu(opts)
-    if opts == nil then opts = {} end
-    
-    local newmenu = {
-        x = -1,
-        y = -1,
-        width = -1,
-        height = -1,
-        bg = {0.2, 0.2, 0.6, 1},
-        border = {1, 1, 1, 1},
-        border_thickness = 2,
-        commands = {},
-        text_colour = {1, 1, 1, 1},
-        select_colour = {0.5, 1, 1, 1},
-        disabled_colour = {0.2, 0.2, 0.2, 0.2},
-        cursor = 1,
-        menu_type = "command",
-        back_can_close_last = true,
-        title = "",
-        hover_popout_location = "screen_top",
-        on_close = nil
-    }
-    
-    MergeObj(newmenu, opts)
-    table.insert(MenuStack, newmenu)
-end
-
-function RemoveMenu()
-    if MenuStack[#MenuStack].on_close ~= nil then
-        MenuStack[#MenuStack].on_close()
-    end
-    table.remove(MenuStack)
-end
-
-function CloseAllMenu()
-    while #MenuStack ~= 0 do
-        RemoveMenu()
-    end
-end
-
-function AddMenuCommand(opts)
-    if opts == nil then opts = {} end
-    local current = MenuStack[#MenuStack]
-    local newcmd = {
-        text = "Default Command",
-        callback = nil,
-        enabled = true,
-        sfx = "confirm",
-        value_type = nil,
-        value = nil,
-        hover_text = ""
-    }
-    MergeObj(newcmd, opts)
-    table.insert(current.commands, newcmd)
-end
-
-function GetSelectedMenuCommand()
-    local m = MenuStack[#MenuStack]
-    return m.commands[m.cursor]
-end
-
-function RemoveMenuCommand(idx)
-    local current = MenuStack[#MenuStack]
-    table.remove(current.commands, idx)
-end
-
-function RenderMenu()
-    if #MenuStack == 0 then return end
-    
-    local current = MenuStack[#MenuStack]
-    if MenuSystems[current.menu_type] ~= nil then
-        MenuSystems[current.menu_type].draw(current)
-        return true
-    end
-end
-
-function HandleMenuInput(ik)
-    if IsMenuOpen() then
-        local current = MenuStack[#MenuStack]
-        if MenuSystems[current.menu_type] ~= nil then
-            return MenuSystems[current.menu_type].key(ik)
-        end
-    end
-
-end
-
+Templates = {}
 
 function FadeBGTo(r, g, b, scale)
     if scale == nil then scale = 1 end
@@ -1012,12 +700,24 @@ BackgroundRGBA = { R = 0, G = 0, B = 0,  A = 0 }
 
 function RenderMap(target)
     if Geometry[target] == nil then print("Can't render map: "..target) return end
-    for _, tile in ipairs(Geometry[target]) do
-        --print(tile[1], tile[2], tile[3])
+    for _, tile in ipairs(Geometry[target].tiles) do
         G.draw(Tiles[tile[3]], tile[1], tile[2])
     end
 end
 
+function IsMusicEnabled()
+    return GlobalSave.system.music
+end
+
+function ToggleMusic()
+    if IsMusicEnabled() then
+        DisableMusic()
+        return "off"
+    else
+        EnableMusic()
+        return "on"
+    end
+end
 function DisableMusic()
     PlayMusic(nil)
     GlobalSave.system.music = false
@@ -1092,7 +792,8 @@ function SetBG()
 end
 
 function SaveFile(name, data)
-    FS.write(name, JSON.encode(data))
+    local s, m = FS.write(name, JSON.encode(data))
+    print(s, m)
 end
 
 function LoadFile(name)
@@ -1101,16 +802,51 @@ function LoadFile(name)
 end
 
 function WriteSave()
-    SaveFile(GetSaveFile(), CurrentSave)
+    SaveFile("saves/"..GetSaveFile(), CurrentSave)
+    return GlobalSave.system.savefile
 end
 
-function LoadSave()
-    if FS.getInfo(GetSaveFile()) == nil then
+function ListSaves()
+    local out = {}
+    print("Scanning saves in", SaveDir)
+    for _, item in ipairs(love.filesystem.getDirectoryItems("saves")) do
+        if string.starts_with(item, "save") and string.ends_with(item, ".json") then 
+            local f = tonumber(string.match(item, "%d+"))
+            table.insert(out, f)
+        end
+    end
+    return out
+end
+
+function GetNextSaveID()
+    local lastid = -1
+    local saves = ListSaves()
+    
+    if #saves == 0 then return 0 end
+
+    while true do
+        lastid = lastid + 1
+        print("Checking", lastid)
+        if not table.contains(saves, lastid) then return lastid end
+    end
+end
+
+function ParseSave(id)
+    return LoadFile("saves/"..GetSaveFile(id))
+end
+
+function LoadSave(newsave)
+    if newsave == "default" then
+        CurrentSave = DeepCopy(DefaultSave)
+        return
+    end
+    GlobalSave.system.savefile = tonumber(newsave)
+    if FS.getInfo("saves/"..GetSaveFile(newsave)) == nil then
         return false
 
     else
-        print("Loading " .. GetSaveFile())
-        CurrentSave = LoadFile(GetSaveFile())
+        print("Loading saves/"..GetSaveFile(newsave))
+        CurrentSave = LoadFile("saves/"..GetSaveFile(newsave))
         return true
     end
 end
@@ -1121,7 +857,7 @@ function GetSaveFile(i)
 end
 
 function SaveExists(i)
-    return (FS.getInfo(GetSaveFile(i)) ~= nil)
+    return (FS.getInfo("saves/"..GetSaveFile(i)) ~= nil)
 end
 
 function GetKey(action)
@@ -1129,26 +865,6 @@ function GetKey(action)
     return " [ "..table.concat(GlobalSave.keys[action], " | ").." ] "
 end
 
-function DrawHUD()
-    G.print("User: " .. CurrentSave.player.name .. "   //   Supplies: " .. tostring(CurrentSave.player.supplies) .. "   //   Fuel:  " ..tostring(CurrentSave.player.fuel), 0, 0)
-    local x = CurrentSave.player.health
-    local pointer = tonumber(10 * (x / 100.0))
-    local gauge = 
-        "|"
-        .. "-" * pointer
-        .. " " * (10 - pointer)
-        .. "|\n "
-        .. tostring(x)
-        .. "% "
-        
-    G.print(gauge, 0, 15)
-    
-    G.print("EXP: "..tostring(CurrentSave.player.exp), 0, 50)
-    
-    if DebugMode then
-        G.print("Debug Mode Enabled", 0, 65)
-    end
-end
 
 function LoadEScript(extpath)
     local ext = dofile(love.filesystem.getSource().."/scripts/"..extpath..".lua")
@@ -1219,6 +935,7 @@ function ConnectExtension(f)
             print("Linking "..k.." Hook...")
             for hk, hv in pairs(v) do
                 print("Linked "..k.." Hook: ",hk)
+                if Hooks[k] == nil then Hooks[k] = {} end
                 Hooks[k][hk] = hv
             end
         end
@@ -1236,15 +953,17 @@ end
 -- so i can make the file name `space.mp3` while still keeping the full name for the Now Playing track
 -- replace references to MusicNames with TranslationTable
 function love.load()
+    print("Initializing Jade Framework "..JADE_VERSION.."...")
+    
     -- Defining state
     SaveDir = FS.getSaveDirectory()
-    
+    print("SaveDir", SaveDir)
     STORY = require 'stories.abyssal' --TODO add way to change story
     
     -- Loading assets
     Fonts.main = G.newFont("fonts/RobotoMonoNerdFontMono-Bold.ttf")--("FiraCodeNerdFont-Bold.ttf")
-    Fonts.menu = G.newFont("fonts/RobotoMonoNerdFontMono-Bold.ttf", 16)
-    Fonts.notify = G.newFont("fonts/RobotoMonoNerdFontMono-Bold.ttf", 16)
+    Fonts.menu = G.newFont("fonts/FiraCodeNerdFont-Retina.ttf", 16)--("fonts/RobotoMonoNerdFontMono-Bold.ttf", 14)
+    Fonts.notify = G.newFont("fonts/RobotoMonoNerdFontMono-Bold.ttf", 14)
     G.setFont(Fonts.main)
 
     Music.space = A.newSource("music/Andy G. Cohen - Space.mp3", "stream")
@@ -1316,7 +1035,19 @@ function love.load()
         print("Loading default globals")
         GlobalSave = LoadFile(GlobalFileName)
     end
-
+    
+    -- Loading maps  
+    if FS.getInfo("maps") == nil then love.filesystem.createDirectory( "maps" ) end
+    
+    for _, item in ipairs(love.filesystem.getDirectoryItems( "maps" )) do
+        if string.ends_with(item, ".json") then 
+            local f = string.gsub(item, "%..+", "")
+            print("Loading map", love.filesystem.getSource().."/maps/"..item.." as "..f)
+            local data = LoadFile("maps/"..item)
+            Geometry[f] = data
+        end
+    end
+    
     -- Loading extra scripts        
     for _, item in ipairs(love.filesystem.getDirectoryItems( "scripts" )) do
         if string.ends_with(item, ".lua") then 
@@ -1342,11 +1073,11 @@ end
 function love.keypressed( key, scancode, isrepeat )
     -- Global system binds
     local blocking = false
-    
-    for _, v in pairs(Hooks.keypress) do
-        blocking = v(key, scancode, isrepeat)
+    if Hooks.keypress ~= nil then
+        for _, v in pairs(Hooks.keypress) do
+            blocking = v(key, scancode, isrepeat)
+        end
     end
-    
     if blocking then return end
     
     --TODO delete this once options menu is complete
@@ -1391,31 +1122,48 @@ ShowMusic = true
 
 
 function love.textinput(t)
-    for _, v in pairs(Hooks.textinput) do
-        v(t)
-    end
+    ExecHook("textinput", {t})
     
     if Scene.get().textinput ~= nil then
         Scene.get().textinput(t)
     end
 end
 
+function ExecHook(name, data)
+    if Hooks[name] == nil then return end
+
+    for _, v in pairs(Hooks[name]) do
+        if data == nil then 
+            v()
+        else
+            v(unpack(data))
+        end
+    end
+end
+
 function love.mousepressed( x, y, button, istouch, presses )
+    ExecHook("mousepressed", {x, y, button, istouch, presses})
     if Scene.get().mousepressed ~= nil then
         Scene.get().mousepressed(x, y, button, istouch, presses)
     end
 end
 
+function love.mousereleased( x, y, button, istouch, presses )
+    ExecHook("mousereleased", {x, y, button, istouch, presses})
+    if Scene.get().mousereleased ~= nil then
+        Scene.get().mousereleased(x, y, button, istouch, presses)
+    end
+end
+
 function love.mousemoved( x, y, dx, dy, istouch )
+    ExecHook("mousemoved", {x, y, dx, dy, istouch})
     if Scene.get().mousemoved ~= nil then
         Scene.get().mousemoved(x, y, dx, dy, istouch)
     end
 end
 
 function love.draw() 
-    for _, v in pairs(Hooks.predraw) do
-        v()
-    end
+    ExecHook("predraw")
     
     if ShowGrid then
         love.graphics.setColor({1, 1, 1, 0.5})
@@ -1448,9 +1196,7 @@ function love.draw()
     
     RenderMenu()
 
-    for _, v in pairs(Hooks.postdraw) do
-        v()
-    end
+    ExecHook("postdraw")
     
     
 end

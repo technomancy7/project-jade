@@ -39,7 +39,7 @@ return {
                 MouseYRaw = 0,
                 MouseXTile = 0,
                 MouseYTile = 0,
-                ForceTileAlign = false
+                ForceTileAlign = true
             },
             keypress = function( key, scancode, isrepeat ) 
                 if key == "f1" then
@@ -96,9 +96,9 @@ return {
                 --TODO delete any existing entries on that space first
                 -- may need to write some helper functions, one for GetTile, SetTile, DeleteTile
                 if SV().ForceTileAlign then
-                    table.insert(Geometry[SV().CurrentMap], {SV().MouseXTile, SV().MouseYTile, SV().CurrentTile})
+                    table.insert(Geometry[SV().CurrentMap].tiles, {SV().MouseXTile, SV().MouseYTile, SV().CurrentTile})
                 else
-                    table.insert(Geometry[SV().CurrentMap], {SV().MouseXRaw, SV().MouseYRaw, SV().CurrentTile})
+                    table.insert(Geometry[SV().CurrentMap].tiles, {SV().MouseXRaw, SV().MouseYRaw, SV().CurrentTile})
                 end
                 
                 
@@ -127,6 +127,10 @@ return {
                 end
                 
                 G.print("Map: "..filename.." // Tile: "..s.CurrentTile.." (Solid (F4): "..tostring(s.CurTileSolid)..") // Mouse: "..s.MouseXRaw.."/"..s.MouseYRaw.." ("..math.floor(SV().MouseXRaw / 32).."/"..math.floor(s.MouseYRaw / 32)..") [Toggle Alignment: F5] // Grid: "..tostring(ShowGrid).." (G)")
+                
+                local ti = Geometry[filename].name or "Undefined"
+                local aut = Geometry[filename].author or "Undefined"
+                G.print("Name: "..ti.." // Author: "..aut, 0, 20)
             end,
             closing = function() end
         },
@@ -147,9 +151,9 @@ return {
             end
             
             if cmd == "edit" then
-                if val == "" then AddNotify("Map name required.") else 
+                if val == "" then AddNotify("Map name required.") else                     
                     if Geometry[val] == nil then
-                        Geometry[val] = {}
+                        Geometry[val] = {author = "", tiles = {}, name = ""}
                         AddNotify("New project created as "..val..".")
                     else
                         AddNotify("Loaded map "..val)
@@ -162,7 +166,20 @@ return {
                     CloseAllMenu()
                     CloseConsole()
                 end
-                
+            elseif cmd == "name" then
+                Geometry[SV().CurrentMap].name = val
+            elseif cmd == "author" then
+                Geometry[SV().CurrentMap].author = val    
+            elseif cmd == "save" then
+                    if Scene.name ~= "map_editor" then return AddNotify("Map editor not open.") end
+                    local m = SV().CurrentMap
+                    if Geometry[m] ~= nil then
+                        local data = Geometry[m]
+                        SaveFile("maps/"..m..".json", data)
+                        AddNotify("Saved map maps/"..m..".json")
+                    else
+                        AddNotify("Missing map data...")
+                    end
             end
         end
     }
