@@ -15,9 +15,9 @@ require "entity"
 
 -- TODO
 --[[
-Extend Windows system, allow for disabling titlebar (including moving shading and closing) and optionally show a little name card like menus
+Text Input box element for windows
 
-Util functions for window elemts, like buttons
+load "terminal" font and use that for menus?
 
 Everything rpg based on skills, weapons, armour, also hacking, fishing 
 
@@ -63,23 +63,18 @@ Menu hooks for exit
 Show story info on main menu screen
 
 
-Maybe group up ai scripts and spawners by game mode so rpg and space can have their own space
-
-make the story loading flexible
-
-remake the floating text as entities instead of their own system
-add the expanding/contracting rings idea also as an entity
 
 move more story-specific functions to the story file (abyssal.lua) or abyssal_scripts.lua in the scripts directory
 
 
 
 - Optional third entry in event choice for conditionals, if exists then only show if conditionals are true, same as main
-- Variant of execute for NPCs, but range check sets a flag that highlights it and prompts for interaction
-- create a generic function for spawning a circle and expand or contract it, with a set value that destroys it when reached, similar to the floating text, use for highlighting things like UI updates
-- refine floating text system and use same API for the rings, add callbacks that let me define functions to run when it expires
-- add system for clickable zones, debug spawns a blue rectangle around it
 
+- Variant of execute for NPCs, but range check sets a flag that highlights it and prompts for interaction
+
+- create a generic function for spawning a circle and expand or contract it, with a set value that destroys it when reached, similar to the floating text, use for highlighting things like UI updates
+
+- refine floating text system and use same API for the rings, add callbacks that let me define functions to run when it expires
 
 
 Turn based, all actions consume energy, you can jump in with actions whenever by pressing the button related to the character, can only use actions if you have the energy for, and energy regains slowly over time
@@ -88,13 +83,49 @@ For resources, mp alternative, maybe have some charges or some other mp equivale
 For enemy AI, say they decide an action, then charge their energy up to use it
 
 
+Card based battle system
+Keep it simple, each character has X energy, maybe out of 100, and each character has their own deck of cards
+Characters may regenerate a small amount of energy each turn based on some skills or upgrades, or discard a card to gain its cost as energy
+Cards are simple rules, which represent as basic symbols or keywords
+Cards can be modified by skills, like Armour X gives X+Your Armour skill
 
-For maps
-Geometry table loads from both the /maps directory, and also can be integrated by scripts like other containers
-Sprites will need to be stored as strings and converted to the relevant object when loaded
+Cost (top corner)
+In-card values:
+Attack X - Deals X damage to adjacent enemy
+Shoot X - Deals X damage to distant enemy in row
+Armour X - Reduces damage by X amount, armour is reduced after each attack
+Move X - Moves X tiles
+Ghost - Usable once per combat
+Destroy - Removed from deck completely
++ Inflict X - Only if Attack or Shoot, if attack hits, guarantees apply status effect on target
++ May inflict X - Only if Attack or Shoot, if attack hits, chance to apply status effect on target
+Gain X - Apply status effect to self
+Draw X - Draw X cards
+If X then Y - X can be a conditional related to the battle
++ If target X then Y - Only if Attack or Shoot, if target conditional then do Y, such as if target has status
++ If self X then Y - Only if Attack or Shoot, conditional based on the caster
+
+Status effects
+Armour (Reduces damage taken by Armour amount, then reduces Armour amount by some fraction)
+Dodge (Evades next attack)
+Poison X (Takes X damage each turn, then reduce Poison by 1)
+Regenerate X (Heals X each turn)
+Curse (May fail next card use)
+Psychic Poison X (Poison, but for energy)
+
 
 For collision checking speedup
 Build a 3d array of coordinates pointing to the tile info when map is loaded in, and use that for collision checking, keep the original list for rendering
+
+
+Menus to create
+In ship only
+Deck management
+Crew management (ground crew vs ship crew, moving around)
+
+Universal
+A button to bring up a help search where you can either type a query in or go down a list, used for defining terms in the world
+Notes screen to let the player write anything they want in, either for remembering things or creating their own goals, plus API's for letting code interface with the notes system
 ]]--
 
 
@@ -447,7 +478,7 @@ Scenes = {
                     
                     end)
                     
-                    y = h-20
+                    y = y+20--h-20
                     WindowManager.Button("Close Window", x, y, data, function()
                         WindowManager.destroy("Development")
                     
