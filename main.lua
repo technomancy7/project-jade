@@ -447,7 +447,7 @@ Scenes = {
                     
                     end)
                     
-                    y = y+20
+                    y = h-20
                     WindowManager.Button("Close Window", x, y, data, function()
                         WindowManager.destroy("Development")
                     
