@@ -84,6 +84,7 @@ For enemy AI, say they decide an action, then charge their energy up to use it
 
 
 Card based battle system
+System for loading cards from both cards.json main file, and /cards/ directory
 Keep it simple, each character has X energy, maybe out of 100, and each character has their own deck of cards
 Characters may regenerate a small amount of energy each turn based on some skills or upgrades, or discard a card to gain its cost as energy
 Cards are simple rules, which represent as basic symbols or keywords
@@ -104,8 +105,9 @@ Draw X - Draw X cards
 If X then Y - X can be a conditional related to the battle
 + If target X then Y - Only if Attack or Shoot, if target conditional then do Y, such as if target has status
 + If self X then Y - Only if Attack or Shoot, conditional based on the caster
+X =/-=/+= Y - Modifies status effect counter (called registers in-game)
 
-Status effects
+Status effects/registers
 Armour (Reduces damage taken by Armour amount, then reduces Armour amount by some fraction)
 Dodge (Evades next attack)
 Poison X (Takes X damage each turn, then reduce Poison by 1)
@@ -126,6 +128,9 @@ Crew management (ground crew vs ship crew, moving around)
 Universal
 A button to bring up a help search where you can either type a query in or go down a list, used for defining terms in the world
 Notes screen to let the player write anything they want in, either for remembering things or creating their own goals, plus API's for letting code interface with the notes system
+
+
+Move colouring for buttons, menus, etc in to a theme global
 ]]--
 
 
@@ -224,6 +229,8 @@ GlobalSave = {
         command_menu = { "z", "1" },
     }
 }
+
+Theme = {}
 
 TranslationTable = {
     main = "RobotoMonoNerdFontMono-Bold",
@@ -373,44 +380,34 @@ Scenes = {
             saves = {}
         },
         keypress = function( key, scancode, isrepeat ) 
-            if not IsMenuOpen() then
+            if not IsMenuOpen() and not MenuDeactivated then
+               -- print("Menu not open")
                 Scenes.menu_main.opening()
             end
         end,
         opening = function() 
+            SV().saves = ListSaves()
+            print("Menus "..tostring(#MenuStack))
             CreateMenu({title = "Main", on_close = function() print("Main menu closed.") end})
             AddMenuCommand({text = "Continue", enabled = GlobalSave.system.savefile ~= 0 and SaveExists(GlobalSave.system.savefile)})
             
             AddMenuCommand({text = "New Story", hover_text = "Starts a brand new story.",
             
             callback = function()
-                    --[[if LoadSave() then
-                        if not CurrentSave.flags.done_tutorial then
-                            ActivateEvent(STORY.start_scene)
-                        else
-                            Scene.set(STORY.main_scene)
-                        end
-                        Sfx("confirm")
-                        CloseAllMenu()
-                        return
-                    else]]--
-                        GlobalSave.system.savefile = GetNextSaveID()
-                        AddNotify("Initializing save slot "..tostring(GlobalSave.system.savefile))
-                        SaveFile(GetSaveFile(GlobalSave.system.savefile), DefaultSave)
-                        Sfx("confirm")
-                        CloseAllMenu()
-                        WindowManager.destroy("Development")
-                        LoadSave("default")
-                        if not CurrentSave.flags.done_tutorial then
-                            ActivateEvent(STORY.start_scene)
-                        else
-                            Scene.set(STORY.main_scene)
-                        end
-                        
-                    --end
+                GlobalSave.system.savefile = GetNextSaveID()
+                AddNotify("Initializing save slot "..tostring(GlobalSave.system.savefile))
+                SaveFile(GetSaveFile(GlobalSave.system.savefile), DefaultSave)
+                Sfx("confirm")
+                CloseAllMenu()
+                WindowManager.destroy("Development")
+                LoadSave("default")
+                if not CurrentSave.flags.done_tutorial then
+                    ActivateEvent(STORY.start_scene)
+                else
+                    Scene.set(STORY.main_scene)
+                end
             end})
             
-            SV().saves = ListSaves()
             AddMenuCommand({text = "Load Save", callback = function()
                 CreateMenu({title = "Load Saves"})
                 for _, i in ipairs(SV().saves) do
@@ -1226,7 +1223,11 @@ function love.draw()
     end
     
     RenderMenu()
-
+    
+    if Scene.get().postdraw ~= nil then
+        Scene.get().postdraw()
+    end
+    
     ExecHook("postdraw")
     
     

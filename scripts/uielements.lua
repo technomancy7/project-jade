@@ -18,10 +18,30 @@ function AddNotify(text, lifespan)
     table.insert(Notifications, {text = text or "Missing notification text!", max_lifespan = lifespan or 500, lifespan = lifespan or 500})
 end
 
+-- TODO
+-- mouse regions are clickable while window is shaded, add checks to events to make sure parent is not shaded
+
 WindowManager = {
     windows = {},
     emits = {},
     mouse_regions = {},
+    focus = nil,
+    entries = {},
+    listboxes = {},
+    events = {
+        close = {}
+    },
+    --[[adv_elements = {},
+    
+    CreateListbox = function(label, parent, x, y, w, max_lines, entries)
+        WindowManager.windows[parent].elements[label] = {
+            draw = function() end,
+            
+        }
+    end,]]--
+    next_focus = function()
+    
+    end,
     spawn = function(label, x, y, width, height, elements, fmt)
         WindowManager.windows[label] = {x = x, y = y, width = width, height = height, elements = elements or {}, fmt = fmt or {}}
         WindowManager.emits[label] = {}
@@ -41,11 +61,16 @@ WindowManager = {
 
     destroy = function(label)
         for k, v in pairs(WindowManager.mouse_regions) do
-            print("Killing mouse region ", k)
+            print("Killing data for ", k)
             if v.parent == label then WindowManager.mouse_regions[k] = nil end
+            WindowManager.entries[k] = nil
+            if WindowManager.focus.label == k then WindowManager.focus = {} end
         end
         WindowManager.windows[label] = nil
         WindowManager.emits[label] = nil
+        if WindowManager.events["close"][label] then
+            WindowManager.events["close"][label]()
+        end
     end,
     
     destroy_all = function()
@@ -62,6 +87,98 @@ WindowManager = {
         WindowManager.windows[label].elements[tag] = nil
     end,
     
+    ListBox = function(label, x, y, width, lines, entries, data, callback)
+        data = data or {}
+
+        local mx = data.mx
+        local my = data.my
+        local font = data.font or Fonts.main
+        width = width or 100
+        local height = font:getHeight()--*lines
+        local bg = data.bg or {0.3, 0.3, 0.3}
+        local fg = data.fg or {1, 1, 1}
+        local text_colour = data.text_colour or {1, 1, 1}
+    
+        if WindowManager.listboxes[label] == nil then WindowManager.listboxes[label] = {
+            offset = 0
+        } end
+        local offset = WindowManager.listboxes[label].offset
+        
+        WindowManager.Button("UP", x+width, y, data, function()
+            WindowManager.listboxes[label].offset = WindowManager.listboxes[label].offset - 1
+        end)
+        
+        WindowManager.Button("DN", x+width, y+(font:getHeight()*lines), data, function()
+            WindowManager.listboxes[label].offset = WindowManager.listboxes[label].offset + 1
+        end)
+        
+        --for _, entry in ipairs(entries) do
+        for i=offset+1,lines+offset,1 do
+            local entry = entries[i]
+            
+            if mx > x and mx < x+width and my > y and my < y+height then
+                bg = data.sbg or {0.8, 0.8, 0.8}
+                --WindowManager.mouse_regions[entry].selected = entry
+            end
+            
+            G.setColor(bg)
+            G.rectangle("fill", x, y, width, height)
+            
+            G.setColor(fg)
+            G.rectangle("line", x, y, width, height)
+            if entry ~= nil then
+                --if WindowManager.mouse_regions[label] == nil then
+                WindowManager.mouse_regions[entry] = {parent = data.parent, x = x, y = y, width = width, height = height, callback = callback, label = entry}
+
+                G.setColor(text_colour)
+                G.print(entry, x+5, y)
+            end
+            y = y + font:getHeight()
+            bg = data.bg or {0.3, 0.3, 0.3}
+        end
+        
+
+        G.setColor({1,1,1})
+    end,
+    
+    TextEntry = function(label, x, y, width, data, callback)
+        data = data or {}
+
+        local mx = data.mx
+        local my = data.my
+        local font = data.font or Fonts.main
+        width = width or 100
+        local height = font:getHeight()
+        local bg = data.bg or {0.3, 0.3, 0.3}
+        local fg = data.fg or {1, 1, 1}
+        local text_colour = data.text_colour or {1, 1, 1}
+
+        if WindowManager.entries[label] == nil then WindowManager.entries[label] = "" end
+        
+        WindowManager.mouse_regions[label] = {label = label, parent = data.parent, x = x, y = y, width = width, height = height, callback = callback}
+        
+        if mx > x and mx < x+width and my > y and my < y+height then
+            WindowManager.focus = {elem = "entry", label = label, callback = callback}
+        end
+        
+        if WindowManager.focus.label == label then
+            bg = data.sbg or {0.8, 0.8, 0.8}
+        end
+        
+        G.setColor(bg)
+        G.rectangle("fill", x, y, width, height)
+        
+        G.setColor(fg)
+        G.rectangle("line", x, y, width, height)
+        
+        
+        G.setColor(text_colour) --TODO give border box to label above the entry box
+        G.print(label, x+5, y+10)
+        
+        G.print(WindowManager.entries[label], x+5, y)
+        G.setColor({1,1,1})
+    end,
+    
     Button = function(label, x, y, data, callback)
         data = data or {}
 
@@ -75,7 +192,7 @@ WindowManager = {
         local fg = data.fg or {1, 1, 1}
         local text_colour = data.text_colour or {1, 1, 1}
         --if WindowManager.mouse_regions[label] == nil then
-        WindowManager.mouse_regions[label] = {parent = data.parent, x = x, y = y, width = width, height = height, callback = callback}
+        WindowManager.mouse_regions[label] = {label = label, parent = data.parent, x = x, y = y, width = width, height = height, callback = callback}
         --end
         if mx > x and mx < x+width and my > y and my < y+height then
             bg = data.sbg or {0.8, 0.8, 0.8}
@@ -162,12 +279,21 @@ WindowManager = {
                     v(x, y, width, height, {mx = mx, my = my, parent = label})
                 end
             end
+            
+            for k, v in pairs(elements) do
+                if v ~= nil then
+                    v(x, y, width, height, {mx = mx, my = my, parent = label})
+                end
+            end
+            
         end
     end
 }
 
 
 -- Menus
+MenuDeactivated = false
+
 MenuSystems = {
     command = {
         mouse_click = function(current, mx, my, button)
@@ -391,6 +517,7 @@ MenuSystems = {
 }
 
 function IsMenuOpen()
+    if MenuDeactivated then return false end
     return (#MenuStack > 0)
 end
 
@@ -465,12 +592,12 @@ function RemoveMenuCommand(idx)
 end
 
 function RenderMenu()
-    if #MenuStack == 0 then return end
-    
-    local current = MenuStack[#MenuStack]
-    if MenuSystems[current.menu_type] ~= nil then
-        MenuSystems[current.menu_type].draw(current)
-        return true
+    if IsMenuOpen() then 
+        local current = MenuStack[#MenuStack]
+        if MenuSystems[current.menu_type] ~= nil then
+            MenuSystems[current.menu_type].draw(current)
+            return true
+        end
     end
 end
 
@@ -564,6 +691,24 @@ return {
     end,
     
     hooks = {
+        textinput = {
+            input_entry = function(t)
+                print("Entry", t)
+                if WindowManager.focus ~= nil then
+                    WindowManager.entries[WindowManager.focus.label] = WindowManager.entries[WindowManager.focus.label] + t
+                    return true
+                end
+            end
+        },
+        keypress = {
+            send_input = function(key)
+                if WindowManager.focus ~= nil and key == "return" then
+                   WindowManager.focus.callback() 
+                end
+                
+            end
+            
+        },
         postdraw = {
             debug = function()
                 if DebugMode then
@@ -673,8 +818,11 @@ return {
                 
                 for k, v in pairs(WindowManager.mouse_regions) do
                     if x > v.x and x < v.x+v.width and y > v.y and y < v.y+v.height then
-                        v.callback()
+                        local main = WindowManager.windows[v.parent]
 
+                        if not main.fmt.shaded then
+                            v.callback(v)
+                        end
                     end
                 end
                 --[[if WindowManager.events["mouse_click"] ~= nil then

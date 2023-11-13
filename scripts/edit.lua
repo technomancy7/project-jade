@@ -17,7 +17,7 @@ return {
     end,
     
     -- Table that is merged in to the global scens
-    scenes = {
+    scenes = { --TODO switch text editor from scene to window
         text_editor = {
             vars = {
                 Text = "",

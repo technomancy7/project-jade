@@ -1,0 +1,29 @@
+{
+    "cards": [
+        {
+            "name": "Beam Rifle",
+            "cost": 10,
+            "commands": ["shoot 15"]
+        },
+        {
+            "name": "Nanoglass Blade",
+            "cost": 5,
+            "commands": ["attack 15"]
+        },
+        {
+            "name": "Raise Shields",
+            "cost": 10,
+            "commands": ["armour 15"]
+        },
+        {
+            "name": "Grenade",
+            "cost": 10,
+            "commands": ["shoot 15", "ghost"]
+        },
+        {
+            "name": "Regen Field",
+            "cost": 40,
+            "commands": ["gain regenerate 5"]
+        },
+    ]
+}
